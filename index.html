@@ -1,0 +1,487 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>SSOMA – Kaizen GPT</title>
+  <link rel="shortcut icon" href="assets/Icon App.png" type="image/x-icon">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
+  <style>
+    :root{
+      --bg:#0b0b0b;
+      --panel:#111214;
+      --panel-2:#17181b;
+      --text:#ffffff;
+      --muted:#9aa1a9;
+      --primary:#e10600;
+      --primary-700:#b00500;
+      --ok:#14b885;
+      --border:#23252a;
+      --shadow:0 10px 30px rgba(0,0,0,.35);
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{
+      margin:0; font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,'Helvetica Neue',Arial;
+      color:var(--text); background:var(--bg);
+      background-image:url('/assets/Kaizen Crimson 1.003000.png');
+      background-size:cover; background-position:center; background-attachment:fixed;
+    }
+    .veil{position:fixed; inset:0; background:linear-gradient(180deg,rgba(0,0,0,.65),rgba(0,0,0,.75));}
+
+    .layout{display:grid; grid-template-columns:280px 1fr; gap:18px; max-width:1280px; margin:0 auto; padding:24px 18px 20vh; position:relative}
+    @media (max-width:980px){ .layout{grid-template-columns:1fr} .sidebar{display:none} }
+
+    /* Sidebar (historial) */
+    .sidebar{
+      background:linear-gradient(180deg,#0d0e10,#0a0b0c);
+      border:1px solid var(--border); border-radius:16px; padding:12px; box-shadow:var(--shadow);
+      height:72vh; overflow:auto;
+    }
+    .sb-head{display:flex; align-items:center; gap:10px; margin:6px 4px 10px}
+    .sb-head img{width:28px; height:28px}
+    .sb-title{font-weight:600}
+    .conv{border:1px solid var(--border); border-radius:12px; padding:10px; margin:8px 4px; background:#101114; cursor:pointer}
+    .conv:hover{background:#14161a}
+    .conv .t{font-size:13px; color:#e6e8ea}
+    .conv .s{font-size:12px; color:var(--muted); margin-top:4px}
+    .conv.active{outline:2px solid var(--primary)}
+
+    /* Main */
+    .brand{
+      display:flex; align-items:center; gap:14px; user-select:none; width:fit-content;
+      padding:12px 14px; border-radius:14px; background:rgba(0,0,0,.35); backdrop-filter: blur(4px);
+      border:1px solid rgba(255,255,255,.06); margin-bottom:10px;
+    }
+    .brand img.logo{height:44px; width:44px; object-fit:contain; filter: drop-shadow(0 0 2px rgba(0,0,0,.5));}
+    .brand h1{margin:0; font-size:18px; letter-spacing:.5px}
+    .brand .sub{font-size:12px; color:var(--muted); margin-top:2px}
+    .brand .dot{color:var(--ok); font-size:10px; margin-left:6px}
+
+    .panel{
+      background:linear-gradient(180deg,var(--panel),var(--panel-2));
+      border:1px solid var(--border);
+      border-radius:16px; overflow:hidden; box-shadow:var(--shadow);
+    }
+    .messages{height:56vh; overflow:auto; padding:20px; scroll-behavior:smooth;}
+    .msg{display:flex; gap:12px; margin-bottom:14px; animation:pop .2s ease-out}
+    @keyframes pop{from{transform:scale(.98); opacity:.0} to{transform:scale(1); opacity:1}}
+    .avatar{
+      flex:0 0 34px; height:34px; border-radius:9px; background:#0e0f12; display:grid; place-items:center;
+      border:1px solid var(--border);
+    }
+    .avatar.user{background:#0d1411; border-color:#123529}
+    .avatar.ai{background:#150e0e; border-color:#2a1414}
+    .avatar img{width:24px; height:24px; object-fit:contain}
+    .bubble{
+      max-width:80%; padding:12px 14px; border-radius:12px;
+      line-height:1.5; border:1px solid var(--border);
+      background:#0f1512;
+    }
+    .ai .bubble{background:#140f10}
+    .meta{font-size:12px; color:var(--muted); margin-top:6px}
+
+    /* chips de archivo */
+    .file-chip{display:inline-flex; align-items:center; gap:8px; margin-top:10px; padding:8px 10px; border-radius:10px;
+      border:1px dashed #2a2d32; background:#0f1114; font-size:12px; color:#cfd6de;}
+    .file-chip .badge{background:var(--primary); color:#fff; font-size:11px; padding:2px 6px; border-radius:6px}
+
+    /* composer */
+    .composer{position:sticky; bottom:0; padding:14px; background:linear-gradient(180deg, transparent, rgba(0,0,0,.7) 30%, rgba(0,0,0,.9)); border-top:1px solid rgba(255,255,255,.06); backdrop-filter: blur(6px);}
+    .bar{display:flex; gap:10px; align-items:center; background:#0d0e10; border:1px solid var(--border); border-radius:14px; padding:8px; box-shadow:inset 0 0 0 1px rgba(255,255,255,.02);}
+    .bar input[type="file"]{display:none}
+    .btn{height:40px; min-width:40px; border:0; border-radius:10px; background:#121316; color:#fff; cursor:pointer; display:grid; place-items:center; transition:.15s ease; border:1px solid var(--border);}
+    .btn:hover{transform:translateY(-1px); background:#16181c}
+    .btn.primary{background:linear-gradient(180deg,var(--primary),var(--primary-700)); border-color:#410002}
+    .btn.primary:hover{filter:brightness(1.02)}
+    .btn:disabled{opacity:.6; cursor:not-allowed; transform:none}
+    .field{flex:1; display:flex; align-items:center; gap:8px; background:#0d0e10; border-radius:10px; padding:0 6px;}
+    .field input{width:100%; height:40px; background:transparent; border:0; outline:none; color:#fff; font-size:15px;}
+    .hint{font-size:12px; color:var(--muted); margin-top:8px}
+
+    /* typing dots */
+    .typing{display:inline-flex; gap:6px; align-items:center}
+    .dot{width:6px; height:6px; border-radius:50%; background:#fff; opacity:.7; animation:bounce 1s infinite ease-in-out;}
+    .dot:nth-child(2){animation-delay:.15s}
+    .dot:nth-child(3){animation-delay:.3s}
+    @keyframes bounce{0%,80%,100%{transform:translateY(0); opacity:.5} 40%{transform:translateY(-5px); opacity:1}}
+
+    /* Preview flotante del adjunto */
+    .attach-float{
+      position:fixed; right:26px; bottom:140px; width:320px; max-width:70vw; border-radius:18px;
+      background:#2a2c30; border:1px solid #3a3d44; box-shadow:var(--shadow); display:none; overflow:hidden;
+    }
+    .attach-head{display:flex; justify-content:space-between; align-items:center; padding:8px 10px; background:#1b1d21}
+    .attach-head .tag{font-size:12px; color:#e6e8ea}
+    .attach-head .actions button{margin-left:6px; background:#0f1012; color:#fff; border:1px solid #30333a; border-radius:8px; height:28px; width:28px; cursor:pointer}
+    .attach-body{padding:10px}
+    .thumb{width:120px; height:120px; border-radius:12px; overflow:hidden; border:1px solid #3a3d44; background:#111}
+    .thumb img{width:100%; height:100%; object-fit:cover}
+    .file-row{display:flex; align-items:center; gap:10px}
+    .file-icon{width:40px; height:40px; border-radius:10px; background:#111; display:grid; place-items:center; border:1px solid #3a3d44}
+    .file-name{font-size:13px; color:#e6e8ea; word-break:break-all; max-width:210px}
+
+    /* footer brand note */
+    .note{font-size:12px; color:var(--muted)}
+    .note strong{color:var(--primary)}
+  </style>
+</head>
+<body>
+  <div class="veil"></div>
+
+  <div class="layout">
+    <!-- Sidebar: historial -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sb-head">
+        <img src="/assets/Kaizen B.png" alt="k">
+        <div>
+          <div class="sb-title">Historial</div>
+          <div class="note">Sesiones recientes</div>
+        </div>
+      </div>
+      <div id="convList"></div>
+    </aside>
+
+    <main>
+      <!-- Header -->
+      <div class="brand">
+        <img class="logo" src="/assets/Icon App.png" alt="Kaizen">
+        <div>
+          <h1>SSOMA – Kaizen <span class="dot">●</span></h1>
+          <div class="sub">Resource Management · Seguridad & RRHH</div>
+        </div>
+      </div>
+
+      <!-- Panel -->
+      <div class="panel">
+        <div id="messages" class="messages"></div>
+
+        <div class="composer">
+          <div class="bar">
+            <label class="btn" title="Adjuntar imagen/archivo">
+              <input id="file" type="file" />
+              📎
+            </label>
+            <div class="field">
+              <input id="input" placeholder="Escribe tu mensaje… (o solo adjunta un archivo)" />
+            </div>
+            <button id="send" class="btn primary" title="Enviar">➤</button>
+          </div>
+          <div class="hint">
+            <span class="note"><strong>Desarrollado por Kaizen Software</strong><br>Este entorno es de pruebas y no corresponde a un ambiente de producción.</span>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- Ventana flotante de adjunto -->
+  <div class="attach-float" id="attachFloat">
+    <div class="attach-head">
+      <div class="tag">Archivo adjunto listo</div>
+      <div class="actions">
+        <button id="afEdit" title="Cambiar">✎</button>
+        <button id="afClear" title="Quitar">✖</button>
+      </div>
+    </div>
+    <div class="attach-body" id="afBody"></div>
+  </div>
+
+  <script>
+    // ===== Config =====
+    const API = 'http://localhost:3000';
+    const SESSION_ID = 'demo-user-001';
+    let THREAD_ID = localStorage.getItem('THREAD_ID') || null;
+
+    // ===== Estado / Historial en localStorage =====
+    // Estructura: { threads: { [threadId]: {title, ts, messages:[{role,html,raw,attName?}] } }, lastThreadId }
+    const LS_KEY = 'KAIZEN_THREADS';
+
+    function loadStore(){
+      try{ return JSON.parse(localStorage.getItem(LS_KEY)) || { threads:{}, lastThreadId:null }; }
+      catch{ return { threads:{}, lastThreadId:null }; }
+    }
+    function saveStore(store){ localStorage.setItem(LS_KEY, JSON.stringify(store)); }
+
+    function ensureThreadStore(tid){
+      const store = loadStore();
+      if(!store.threads[tid]){
+        store.threads[tid] = { title:'Nuevo chat', ts:Date.now(), messages:[] };
+      }
+      store.lastThreadId = tid;
+      saveStore(store);
+    }
+    function pushMessage(tid, msg){
+      const store = loadStore();
+      ensureThreadStore(tid);
+      store.threads[tid].messages.push(msg);
+      if(!store.threads[tid].title || store.threads[tid].title==='Nuevo chat'){
+        // usa el primer texto del usuario como título si existe
+        if(msg.role==='user' && msg.raw){
+          store.threads[tid].title = msg.raw.slice(0,50);
+        }
+      }
+      store.threads[tid].ts = Date.now();
+      saveStore(store);
+    }
+    function renderSidebar(){
+      const {threads,lastThreadId} = loadStore();
+      const list = document.getElementById('convList');
+      const items = Object.entries(threads)
+        .sort((a,b)=>b[1].ts - a[1].ts)
+        .map(([tid,data])=>{
+          const div = document.createElement('div');
+          div.className = 'conv'+(tid===lastThreadId?' active':'');
+          div.innerHTML = `<div class="t">${data.title||'(sin título)'}</div><div class="s">${new Date(data.ts).toLocaleString()}</div>`;
+          div.onclick = ()=>loadConversation(tid);
+          return div;
+        });
+      list.innerHTML = '';
+      items.forEach(el=>list.appendChild(el));
+    }
+    function loadConversation(tid){
+      const store = loadStore();
+      if(!store.threads[tid]) return;
+      localStorage.setItem('THREAD_ID', tid);
+      THREAD_ID = tid;
+      store.lastThreadId = tid;
+      saveStore(store);
+
+      messagesEl.innerHTML = '';
+      for(const m of store.threads[tid].messages){
+        addMessage(m.role, m.html, m.attName);
+      }
+      renderSidebar();
+      scrollToBottom();
+    }
+
+    // ===== UI helpers =====
+    const $ = sel => document.querySelector(sel);
+    const messagesEl = $('#messages');
+
+    function scrollToBottom(){ messagesEl.scrollTop = messagesEl.scrollHeight + 999; }
+
+    function escapeHtml(s){ return s.replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+    // Markdown mínimo: **negrita**, *itálica*, listas, saltos de línea
+    function renderMarkdown(md){
+      if(!md) return '';
+      let s = escapeHtml(md);
+      // listas con - o números
+      s = s.replace(/(^|\n)\s*-\s+(.*)/g, '$1• $2');
+      s = s.replace(/(^|\n)\s*\d+\.\s+(.*)/g, '$1$2'); // deja el número si quieres, aquí lo simplifico
+      // negritas e itálicas (no anidadas complejas)
+      s = s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+      s = s.replace(/\*(.+?)\*/g, '<em>$1</em>');
+      // saltos de línea
+      s = s.replace(/\n/g, '<br>');
+      return s;
+    }
+
+    function msgRow(role, html){
+      const row = document.createElement('div');
+      row.className = `msg ${role}`;
+      row.innerHTML = `
+        <div class="avatar ${role}">
+          <img src="${role==='ai'?'/assets/Kaizen B.png':'/assets/Icon App.png'}" alt="${role}">
+        </div>
+        <div>
+          <div class="bubble">${html}</div>
+          <div class="meta">${role==='ai'?'SSOMA – Kaizen':'Tú'}</div>
+        </div>`;
+      messagesEl.appendChild(row);
+      scrollToBottom();
+      return row;
+    }
+    function addMessage(role, html, attName){
+      const extra = attName ? `<div class="file-chip"><span class="badge">ADJUNTO</span>${escapeHtml(attName)}</div>` : '';
+      return msgRow(role, (html||'')+extra);
+    }
+    function typingBubble(){
+      const row = document.createElement('div');
+      row.className = 'msg ai';
+      row.innerHTML = `
+        <div class="avatar ai">
+          <img src="/assets/Kaizen B.png" alt="ai">
+        </div>
+        <div>
+          <div class="bubble">
+            <span class="typing"><span class="dot"></span><span class="dot"></span><span class="dot"></span></span>
+          </div>
+          <div class="meta">SSOMA – Kaizen</div>
+        </div>`;
+      messagesEl.appendChild(row);
+      scrollToBottom();
+      return row;
+    }
+
+    // ===== Composer / Preview flotante =====
+    const sendBtn = $('#send');
+    const input = $('#input');
+    const fileInput = $('#file');
+
+    const attachFloat = $('#attachFloat');
+    const afBody = $('#afBody');
+    const afEdit = $('#afEdit');
+    const afClear = $('#afClear');
+
+    let selectedFile = null;
+    fileInput.addEventListener('change', async (e)=>{
+      const f = e.target.files[0];
+      if(!f){ hideAttach(); return; }
+      selectedFile = f;
+      showAttachPreview(f);
+    });
+    afEdit.onclick = () => fileInput.click();
+    afClear.onclick = () => { clearAttachment(); };
+
+    function clearAttachment(){
+      selectedFile = null;
+      fileInput.value = '';
+      hideAttach();
+    }
+    function hideAttach(){ attachFloat.style.display = 'none'; afBody.innerHTML=''; }
+    function showAttachPreview(f){
+      const isImage = /^image\//.test(f.type);
+      attachFloat.style.display = 'block';
+      if(isImage){
+        const url = URL.createObjectURL(f);
+        afBody.innerHTML = `
+          <div class="file-row">
+            <div class="thumb"><img src="${url}" alt="preview"></div>
+            <div class="file-name">${escapeHtml(f.name)}</div>
+          </div>`;
+      }else{
+        afBody.innerHTML = `
+          <div class="file-row">
+            <div class="file-icon">📄</div>
+            <div class="file-name">${escapeHtml(f.name)}</div>
+          </div>`;
+      }
+    }
+
+    // ===== Llamada al backend =====
+    async function fileToBase64(file){
+      return new Promise((resolve, reject)=>{
+        const r = new FileReader();
+        r.onload = () => {
+          const s = String(r.result);
+          const comma = s.indexOf(',');
+          resolve(s.slice(comma+1));
+        };
+        r.onerror = reject;
+        r.readAsDataURL(file);
+      });
+    }
+    async function sendQuery({ text, file }){
+      const body = { session_id: SESSION_ID };
+      if (THREAD_ID) body.thread_id = THREAD_ID;
+      if (text) body.text = text;
+
+      if (file){
+        if (file.size > 25*1024*1024) throw new Error('El archivo supera 25MB');
+        const base64 = await fileToBase64(file);
+        body.files = [{ filename: file.name, base64 }];
+      }
+      if (!body.text && !body.files) throw new Error('Debes enviar mensaje y/o adjunto.');
+
+      const res = await fetch(`${API}/chat/query`, {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify(body)
+      });
+      return res.json();
+    }
+
+    async function onSend(){
+      const text = input.value.trim();
+      const file = selectedFile;
+
+      if (!text && !file){
+        addMessage('ai', renderMarkdown('Debes enviar un mensaje y/o adjuntar un archivo.'));
+        return;
+      }
+
+      // Limpia input INMEDIATAMENTE
+      input.value = '';
+
+      // Muestra tu mensaje y adjunto
+      const html = renderMarkdown(text || '(sin texto)');
+      addMessage('user', html, file ? file.name : undefined);
+
+      // Estado UI
+      sendBtn.disabled = true; sendBtn.textContent = '…';
+      const typing = typingBubble();
+
+      try{
+        const data = await sendQuery({ text, file });
+        // limpia adjunto justo después de enviar (independiente de la respuesta)
+        clearAttachment();
+
+        if (data.error){
+          typing.remove();
+          addMessage('ai', renderMarkdown('❌ ' + data.error));
+        }else{
+          if (data.thread_id && data.thread_id !== THREAD_ID){
+            THREAD_ID = data.thread_id;
+            localStorage.setItem('THREAD_ID', THREAD_ID);
+          }
+          typing.remove();
+          const replyHtml = renderMarkdown(data.reply || '(sin respuesta de texto)');
+          addMessage('ai', replyHtml);
+
+          // Persistir mensajes en historial
+          pushMessage(THREAD_ID, { role:'user', html, raw:text, attName: file ? file.name : null });
+          pushMessage(THREAD_ID, { role:'ai', html:replyHtml, raw:data.reply });
+          renderSidebar();
+        }
+      }catch(err){
+        clearAttachment();
+        typing.remove();
+        addMessage('ai', renderMarkdown('❌ Error: '+err.message));
+      }finally{
+        sendBtn.disabled = false; sendBtn.textContent = '➤';
+      }
+    }
+
+    // ===== Eventos =====
+    sendBtn.addEventListener('click', onSend);
+    input.addEventListener('keydown', e=>{ if(e.key==='Enter') onSend(); });
+
+    // Reset: nuevo thread en backend, conservar historial de los anteriores
+    async function newChat(){
+      const res = await fetch(`${API}/session/reset`, {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({ session_id: SESSION_ID })
+      });
+      const d = await res.json();
+      THREAD_ID = d.thread_id;
+      localStorage.setItem('THREAD_ID', THREAD_ID);
+      ensureThreadStore(THREAD_ID);
+      messagesEl.innerHTML = '';
+      addMessage('ai', renderMarkdown('Nuevo chat iniciado. ¿En qué puedo ayudarte?'));
+      renderSidebar();
+    }
+    // Si mantienes tu botón externo con id "reset", puedes engancharlo:
+    document.addEventListener('click', (e)=>{
+      if(e.target && e.target.id==='reset'){ newChat(); }
+    });
+
+    // ===== Inicialización =====
+    // 1) Si hay último thread con historial, cargarlo; si no, bienvenida
+    (function init(){
+      const store = loadStore();
+      if(THREAD_ID && store.threads[THREAD_ID]?.messages?.length){
+        loadConversation(THREAD_ID);
+      }else{
+        addMessage('ai', renderMarkdown('¡Hola! Soy **SSOMA – Kaizen**. Puedes escribir tu consulta y/o adjuntar una imagen o documento relacionado a seguridad ocupacional o RRHH.'));
+      }
+      renderSidebar();
+      // Asegura que exista entrada para el thread actual
+      if(THREAD_ID) ensureThreadStore(THREAD_ID);
+    })();
+  </script>
+</body>
+</html>
