@@ -4,7 +4,7 @@
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
   <title>SSOMA – Kaizen GPT</title>
-  <link rel="shortcut icon" href="assets/Icon App.png" type="image/x-icon">
+  <link rel="shortcut icon" href="./assets/Icon App.png" type="image/x-icon">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
   <style>
@@ -25,7 +25,7 @@
     body{
       margin:0; font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,'Helvetica Neue',Arial;
       color:var(--text); background:var(--bg);
-      background-image:url('/assets/Kaizen Crimson 1.003000.png');
+      background-image:url('./assets/Kaizen Crimson 1.003000.png');
       background-size:cover; background-position:center; background-attachment:fixed;
     }
     .veil{position:fixed; inset:0; background:linear-gradient(180deg,rgba(0,0,0,.65),rgba(0,0,0,.75));}
@@ -134,7 +134,7 @@
     <!-- Sidebar: historial -->
     <aside class="sidebar" id="sidebar">
       <div class="sb-head">
-        <img src="/assets/Kaizen B.png" alt="k">
+        <img src="./assets/Kaizen B.png" alt="k">
         <div>
           <div class="sb-title">Historial</div>
           <div class="note">Sesiones recientes</div>
@@ -146,7 +146,7 @@
     <main>
       <!-- Header -->
       <div class="brand">
-        <img class="logo" src="/assets/Icon App.png" alt="Kaizen">
+        <img class="logo" src="./assets/Icon App.png" alt="Kaizen">
         <div>
           <h1>SSOMA – Kaizen <span class="dot">●</span></h1>
           <div class="sub">Resource Management · Seguridad & RRHH</div>
@@ -284,7 +284,7 @@
       row.className = `msg ${role}`;
       row.innerHTML = `
         <div class="avatar ${role}">
-          <img src="${role==='ai'?'/assets/Kaizen B.png':'/assets/Icon App.png'}" alt="${role}">
+          <img src="${role==='ai'? './assets/Kaizen B.png':'./assets/Icon App.png'}" alt="${role}">
         </div>
         <div>
           <div class="bubble">${html}</div>
@@ -303,7 +303,7 @@
       row.className = 'msg ai';
       row.innerHTML = `
         <div class="avatar ai">
-          <img src="/assets/Kaizen B.png" alt="ai">
+          <img src="./assets/Kaizen B.png" alt="ai">
         </div>
         <div>
           <div class="bubble">
