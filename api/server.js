@@ -209,15 +209,13 @@ async function extendThreadVectorStores(thread_id) {
   } catch (_) {}
 }
 
-// ===================================================================
-// ÚNICO ENDPOINT DE CONSULTA: POST /chat/query
-// ===================================================================
 app.post('/chat/query', async (req, res) => {
   try {
     const {
       session_id,
       thread_id: clientThreadId,
-      text, message,
+      text,
+      message,
       files = [],
       urls = [],
       drive_paths = [],
@@ -226,30 +224,46 @@ app.post('/chat/query', async (req, res) => {
     } = req.body;
 
     const effectiveText = (typeof message === 'string' && message.length) ? message : (text || '');
-    const hasAnyFile = (files?.length || 0) + (urls?.length || 0) + (drive_paths?.length || 0) + (drive_ids?.length || 0) > 0;
+    const trimmedText = (effectiveText || '').trim();
+    const hasAnyFile =
+      (files?.length || 0) +
+      (urls?.length || 0) +
+      (drive_paths?.length || 0) +
+      (drive_ids?.length || 0) > 0;
 
-    if (!session_id) return res.status(400).json({ error: 'session_id requerido' });
-    if (!effectiveText && !hasAnyFile) {
+    if (!session_id) {
+      return res.status(400).json({ error: 'session_id requerido' });
+    }
+
+    if (!trimmedText && !hasAnyFile) {
       return res.status(400).json({ error: 'Debe enviar mensaje y/o adjuntos' });
     }
 
-    // 1) Determinar thread (prioridad al que mande el cliente)
+    if (!hasAnyFile && trimmedText.length > 0 && trimmedText.length <= 2) {
+      return res.json({
+        session_id,
+        thread_id: clientThreadId || sessions.get(session_id) || null,
+        status: 'skipped',
+        reply: 'Necesito un poco más de contexto para poder ayudarte.',
+        reason: 'too_short'
+      });
+    }
+
     let thread_id = clientThreadId || sessions.get(session_id);
     if (!thread_id) {
       const thread = await client.beta.threads.create();
       thread_id = thread.id;
       console.log(`🧵 Nueva sesión por /chat/query: ${session_id} -> ${thread_id}`);
     }
+
     if (sessions.get(session_id) !== thread_id) {
       sessions.set(session_id, thread_id);
       saveSessions(sessions);
       console.log(`🔗 Mapeo actualizado: ${session_id} -> ${thread_id}`);
     }
 
-    // 2) Subir adjuntos (si hay) → obtener file_ids
     const allFileIds = [];
 
-    // 2.a) Base64 inline
     for (const f of files) {
       if (!f?.filename || !f?.base64) continue;
       const mime = guessMime(f.filename);
@@ -258,11 +272,12 @@ app.post('/chat/query', async (req, res) => {
       allFileIds.push(file_id);
     }
 
-    // 2.b) URLs públicas
     for (const u of urls) {
       if (!u?.url) continue;
       const resp = await fetch(u.url);
-      if (!resp.ok) throw new Error(`No se pudo descargar URL: ${u.url} (${resp.status})`);
+      if (!resp.ok) {
+        throw new Error(`No se pudo descargar URL: ${u.url} (${resp.status})`);
+      }
       const ab = await resp.arrayBuffer();
       const buff = Buffer.from(ab);
       const mime = resp.headers.get('content-type') || (u.filename ? guessMime(u.filename) : 'application/octet-stream');
@@ -271,25 +286,34 @@ app.post('/chat/query', async (req, res) => {
       allFileIds.push(file_id);
     }
 
-    // 2.c) Drive (ruta relativa AppSheet)
     for (const d of drive_paths) {
       if (!d?.relative_path) continue;
       const { fileId, mimeType } = await resolveDriveRelativePath(d.relative_path);
       const buff = await downloadDriveFile(fileId);
       const fname = d.relative_path.split('/').pop().replace(/\\/g, '/');
-      const mime = mimeType && !mimeType.startsWith('application/vnd.google-apps') ? mimeType : guessMime(fname);
-      const { file_id } = await uploadBufferToOpenAI(buff, fname, mime, { type: 'drive', drive_path: d.relative_path });
+      const mime = mimeType && !mimeType.startsWith('application/vnd.google-apps')
+        ? mimeType
+        : guessMime(fname);
+      const { file_id } = await uploadBufferToOpenAI(buff, fname, mime, {
+        type: 'drive',
+        drive_path: d.relative_path
+      });
       allFileIds.push(file_id);
     }
 
-    // 2.d) Drive IDs directos (rápido)
     for (const d of drive_ids) {
       if (!d?.file_id) continue;
       const drv = initDriveClientIfPossible();
 
       if (drv) {
-        const metaG = await drv.files.get({ fileId: d.file_id, fields: 'name,mimeType' });
-        const media = await drv.files.get({ fileId: d.file_id, alt: 'media' }, { responseType: 'arraybuffer' });
+        const metaG = await drv.files.get({
+          fileId: d.file_id,
+          fields: 'name,mimeType'
+        });
+        const media = await drv.files.get(
+          { fileId: d.file_id, alt: 'media' },
+          { responseType: 'arraybuffer' }
+        );
         const buff = Buffer.from(media.data);
         const ensured = ensureNameAndMime({
           fileId: d.file_id,
@@ -298,7 +322,12 @@ app.post('/chat/query', async (req, res) => {
           mime: metaG?.data?.mimeType || '',
           buffer: buff
         });
-        const { file_id } = await uploadBufferToOpenAI(buff, ensured.name, ensured.mime, { type: 'drive-id', file_id: d.file_id });
+        const { file_id } = await uploadBufferToOpenAI(
+          buff,
+          ensured.name,
+          ensured.mime,
+          { type: 'drive-id', file_id: d.file_id }
+        );
         allFileIds.push(file_id);
       } else {
         const pub = await downloadPublicDrive(d.file_id);
@@ -309,49 +338,61 @@ app.post('/chat/query', async (req, res) => {
           mime: pub.mime,
           buffer: pub.buffer
         });
-        const { file_id } = await uploadBufferToOpenAI(pub.buffer, ensured.name, ensured.mime, { type: 'drive-id-public', file_id: d.file_id });
+        const { file_id } = await uploadBufferToOpenAI(
+          pub.buffer,
+          ensured.name,
+          ensured.mime,
+          { type: 'drive-id-public', file_id: d.file_id }
+        );
         allFileIds.push(file_id);
       }
     }
 
-    // 3) Armar contenido (text + image_file) y attachments
     const imageFiles = [];
     const otherFiles = [];
+
     for (const id of allFileIds) {
       const source_id = fileIdToSourceId.get(id);
       const metaL = source_id ? fileStore.get(source_id) : null;
       const mime = metaL?.mime || '';
-      if (isImageMime(mime)) imageFiles.push(id);
-      else otherFiles.push(id);
+      if (isImageMime(mime)) {
+        imageFiles.push(id);
+      } else {
+        otherFiles.push(id);
+      }
     }
 
     const content = [];
-    if (effectiveText) content.push({ type: 'text', text: effectiveText });
+    if (effectiveText) {
+      content.push({ type: 'text', text: effectiveText });
+    }
     for (const id of imageFiles) {
       content.push({ type: 'image_file', image_file: { file_id: id } });
     }
+
     const attachments = otherFiles.map(id => ({
       file_id: id,
-      tools: [{ type: 'file_search' }],
+      tools: [{ type: 'file_search' }]
     }));
 
-    console.log(`💬 /chat/query -> session=${session_id} thread=${thread_id} text=${!!effectiveText} imgs=${imageFiles.length} docs=${otherFiles.length}`);
+    console.log(
+      `/chat/query session=${session_id} thread=${thread_id} text="${trimmedText}" imgs=${imageFiles.length} docs=${otherFiles.length}`
+    );
 
-    // 4) Crear mensaje y ejecutar run
     await client.beta.threads.messages.create(thread_id, {
       role: 'user',
       content,
       attachments,
-      metadata: meta || undefined,
+      metadata: meta || undefined
     });
 
-    // 🔒 Mantener vivos los vector stores del hilo
     await extendThreadVectorStores(thread_id);
 
-    // ▶️ Ejecutar con auto-recuperación si el vector store ya expiró
     let run;
     try {
-      run = await client.beta.threads.runs.createAndPoll(thread_id, { assistant_id: ASSISTANT_ID });
+      run = await client.beta.threads.runs.createAndPoll(thread_id, {
+        assistant_id: ASSISTANT_ID
+      });
     } catch (e) {
       const msg = String(e?.error?.message || e.message || '');
       if (/Vector store .* is expired/i.test(msg)) {
@@ -362,10 +403,15 @@ app.post('/chat/query', async (req, res) => {
         console.warn(`♻️ Thread expirado. Migrando ${thread_id} -> ${newId}`);
 
         await client.beta.threads.messages.create(newId, {
-          role: 'user', content, attachments, metadata: meta || undefined
+          role: 'user',
+          content,
+          attachments,
+          metadata: meta || undefined
         });
         await extendThreadVectorStores(newId);
-        run = await client.beta.threads.runs.createAndPoll(newId, { assistant_id: ASSISTANT_ID });
+        run = await client.beta.threads.runs.createAndPoll(newId, {
+          assistant_id: ASSISTANT_ID
+        });
         thread_id = newId;
       } else {
         throw e;
@@ -376,104 +422,47 @@ app.post('/chat/query', async (req, res) => {
 
     if (run.status !== 'completed') {
       return res.status(200).json({
-        session_id, thread_id, status: run.status,
+        session_id,
+        thread_id,
+        status: run.status,
         error: run.last_error?.message || 'Run no completado',
         required_action: run.required_action || null
       });
     }
 
-    // 5) Respuesta
-    const list = await client.beta.threads.messages.list(thread_id);
-    const assistantMsg = list.data.filter(m => m.role === 'assistant').sort((a, b) => b.created_at - a.created_at)[0];
-    const reply = assistantMsg?.content?.map(c => c.text?.value).filter(Boolean).join('\n') || '';
+    const list = await client.beta.threads.messages.list(thread_id, {
+      order: 'desc',
+      limit: 5
+    });
+    const assistantMsg = list.data.find(m => m.role === 'assistant');
+    const reply = assistantMsg?.content
+      ?.map(c => c.text?.value)
+      .filter(Boolean)
+      .join('\n') || '';
 
     res.json({
-      session_id, thread_id, status: run.status, reply, reason: 'ok',
+      session_id,
+      thread_id,
+      status: run.status,
+      reply,
+      reason: 'ok',
       files_used: [
-        ...imageFiles.map(id => ({ file_id: id, source_id: fileIdToSourceId.get(id), kind: 'image' })),
-        ...otherFiles.map(id => ({ file_id: id, source_id: fileIdToSourceId.get(id), kind: 'doc' }))
+        ...imageFiles.map(id => ({
+          file_id: id,
+          source_id: fileIdToSourceId.get(id),
+          kind: 'image'
+        })),
+        ...otherFiles.map(id => ({
+          file_id: id,
+          source_id: fileIdToSourceId.get(id),
+          kind: 'doc'
+        }))
       ]
     });
   } catch (e) {
     console.error('ERR /chat/query', e);
     res.status(500).json({ error: e.message || 'Error en chat/query' });
   }
-});
-
-app.post('/session/reset', async (req, res) => {
-  try {
-    const { session_id } = req.body;
-    if (!session_id) return res.status(400).json({ error: 'session_id requerido' });
-
-    const now = Date.now();
-    const last = lastReset.get(session_id) || 0;
-    if (now - last < 1000) {
-      const existing = sessions.get(session_id);
-      return res.json({ session_id, thread_id: existing, notice: 'reset debounced' });
-    }
-    lastReset.set(session_id, now);
-
-    const thread = await client.beta.threads.create();
-    sessions.set(session_id, thread.id);
-    saveSessions(sessions);
-    console.log(`♻️ Reset sesión: ${session_id} -> ${thread.id}`);
-    res.json({ session_id, thread_id: thread.id });
-  } catch (e) {
-    console.error('ERR /session/reset', e);
-    res.status(500).json({ error: 'Error reiniciando sesión' });
-  }
-});
-
-// === Visualización directa desde Drive ===
-app.get(['/drive/view/:fileId', '/google.drive/view/:fileId'], async (req, res) => {
-  try {
-    const drv = initDriveClientIfPossible();
-    const { fileId } = req.params;
-
-    if (drv) {
-      const meta = await drv.files.get({ fileId, fields: 'name,mimeType' });
-      const media = await drv.files.get({ fileId, alt: 'media' }, { responseType: 'arraybuffer' });
-      const buff = Buffer.from(media.data);
-      const ensured = ensureNameAndMime({
-        fileId,
-        providedName: meta?.data?.name || null,
-        headerName: meta?.data?.name || null,
-        mime: meta?.data?.mimeType || '',
-        buffer: buff
-      });
-      res.setHeader('Content-Type', ensured.mime);
-      res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(ensured.name)}"`);
-      res.setHeader('Cache-Control', 'public, max-age=600');
-      res.end(buff);
-    } else {
-      const pub = await downloadPublicDrive(fileId);
-      const ensured = ensureNameAndMime({
-        fileId,
-        providedName: null,
-        headerName: pub.name,
-        mime: pub.mime,
-        buffer: pub.buffer
-      });
-      res.setHeader('Content-Type', ensured.mime);
-      res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(ensured.name)}"`);
-      res.setHeader('Cache-Control', 'public, max-age=600');
-      res.end(pub.buffer);
-    }
-  } catch (e) {
-    console.error('ERR /drive/view', e);
-    res.status(500).json({ error: e.message || 'Error mostrando archivo de Drive' });
-  }
-});
-
-// Debug (desactiva en prod)
-app.get('/debug/state', (req, res) => {
-  res.json({
-    started_at: STARTED_AT,
-    sessions: Array.from(sessions.entries()).map(([sid, tid]) => ({ session_id: sid, thread_id: tid })),
-    files: Array.from(fileStore.values()).map(({ source_id, filename, mime, origin, openai_file_id }) => ({
-      source_id, filename, mime, origin, openai_file_id
-    }))
-  });
 });
 
 const port = process.env.PORT || 3000;
