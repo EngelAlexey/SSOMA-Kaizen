@@ -188,299 +188,317 @@
     <div class="attach-body" id="afBody"></div>
   </div>
 
-  <script>
-    const API = 'https://ssoma-kaizen-api.onrender.com';
-    const SESSION_ID = 'demo-user-001';
-    let THREAD_ID = localStorage.getItem('THREAD_ID') || null;
+<script>
+  const API = 'https://ssoma-kaizen-api.onrender.com';
+  const SESSION_ID = 'demo-user-001';
+  let THREAD_ID = localStorage.getItem('THREAD_ID') || null;
 
-    // ===== Estado / Historial en localStorage =====
-    // Estructura: { threads: { [threadId]: {title, ts, messages:[{role,html,raw,attName?}] } }, lastThreadId }
-    const LS_KEY = 'KAIZEN_THREADS';
+  const LS_KEY = 'KAIZEN_THREADS';
 
-    function loadStore(){
-      try{ return JSON.parse(localStorage.getItem(LS_KEY)) || { threads:{}, lastThreadId:null }; }
-      catch{ return { threads:{}, lastThreadId:null }; }
+  function loadStore() {
+    try {
+      return JSON.parse(localStorage.getItem(LS_KEY)) || { threads: {}, lastThreadId: null };
+    } catch {
+      return { threads: {}, lastThreadId: null };
     }
-    function saveStore(store){ localStorage.setItem(LS_KEY, JSON.stringify(store)); }
+  }
 
-    function ensureThreadStore(tid){
-      const store = loadStore();
-      if(!store.threads[tid]){
-        store.threads[tid] = { title:'Nuevo chat', ts:Date.now(), messages:[] };
+  function saveStore(store) {
+    localStorage.setItem(LS_KEY, JSON.stringify(store));
+  }
+
+  function ensureThreadStore(tid, baseStore) {
+    const store = baseStore || loadStore();
+    if (!tid) return store;
+    if (!store.threads[tid]) {
+      store.threads[tid] = { title: 'Nuevo chat', ts: Date.now(), messages: [] };
+    }
+    store.lastThreadId = tid;
+    saveStore(store);
+    return store;
+  }
+
+  function pushMessage(tid, msg) {
+    let store = loadStore();
+    store = ensureThreadStore(tid, store);
+    const thread = store.threads[tid];
+    thread.messages.push(msg);
+    if (!thread.title || thread.title === 'Nuevo chat') {
+      if (msg.role === 'user' && msg.raw) {
+        thread.title = msg.raw.slice(0, 50);
       }
-      store.lastThreadId = tid;
-      saveStore(store);
     }
-    function pushMessage(tid, msg){
-      const store = loadStore();
-      ensureThreadStore(tid);
-      store.threads[tid].messages.push(msg);
-      if(!store.threads[tid].title || store.threads[tid].title==='Nuevo chat'){
-        // usa el primer texto del usuario como título si existe
-        if(msg.role==='user' && msg.raw){
-          store.threads[tid].title = msg.raw.slice(0,50);
+    thread.ts = Date.now();
+    saveStore(store);
+  }
+
+  function renderSidebar() {
+    const { threads, lastThreadId } = loadStore();
+    const list = document.getElementById('convList');
+    const items = Object.entries(threads)
+      .sort((a, b) => b[1].ts - a[1].ts)
+      .map(([tid, data]) => {
+        const div = document.createElement('div');
+        div.className = 'conv' + (tid === lastThreadId ? ' active' : '');
+        div.innerHTML =
+          `<div class="t">${data.title || '(sin título)'}</div>` +
+          `<div class="s">${new Date(data.ts).toLocaleString()}</div>`;
+        div.onclick = () => loadConversation(tid);
+        return div;
+      });
+    list.innerHTML = '';
+    items.forEach(el => list.appendChild(el));
+  }
+
+  function loadConversation(tid) {
+    const store = loadStore();
+    if (!store.threads[tid]) return;
+    THREAD_ID = tid;
+    localStorage.setItem('THREAD_ID', THREAD_ID);
+    const messagesEl = document.getElementById('messages');
+    messagesEl.innerHTML = '';
+    for (const m of store.threads[tid].messages) {
+      addMessage(m.role, m.html, m.attName);
+    }
+    renderSidebar();
+    scrollToBottom();
+  }
+
+  const $ = sel => document.querySelector(sel);
+  const messagesEl = $('#messages');
+
+  function scrollToBottom() {
+    messagesEl.scrollTop = messagesEl.scrollHeight + 999;
+  }
+
+  function escapeHtml(s) {
+    return s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  }
+
+  function renderMarkdown(md) {
+    if (!md) return '';
+    let s = escapeHtml(md);
+    s = s.replace(/(^|\n)\s*-\s+(.*)/g, '$1• $2');
+    s = s.replace(/(^|\n)\s*\d+\.\s+(.*)/g, '$1$2');
+    s = s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    s = s.replace(/\*(.+?)\*/g, '<em>$1</em>');
+    s = s.replace(/\n/g, '<br>');
+    return s;
+  }
+
+  function msgRow(role, html) {
+    const row = document.createElement('div');
+    row.className = `msg ${role}`;
+    row.innerHTML = `
+      <div class="avatar ${role}">
+        <img src="${role === 'ai' ? './assets/Kaizen B.png' : './assets/Icon App.png'}" alt="${role}">
+      </div>
+      <div>
+        <div class="bubble">${html}</div>
+        <div class="meta">${role === 'ai' ? 'Kaizen Software' : 'Tú'}</div>
+      </div>`;
+    messagesEl.appendChild(row);
+    scrollToBottom();
+    return row;
+  }
+
+  function addMessage(role, html, attName) {
+    const extra = attName ? `<div class="meta">Adjunto: ${escapeHtml(attName)}</div>` : '';
+    const row = document.createElement('div');
+    row.className = `msg ${role}`;
+    row.innerHTML = `
+      <div class="avatar ${role}">
+        <img src="${role === 'ai' ? './assets/Kaizen B.png' : './assets/Icon App.png'}" alt="${role}">
+      </div>
+      <div>
+        <div class="bubble">${html}</div>
+        <div class="meta">${role === 'ai' ? 'Kaizen Software' : 'Tú'}</div>
+        ${extra}
+      </div>`;
+    messagesEl.appendChild(row);
+    scrollToBottom();
+    return row;
+  }
+
+  function typingBubble() {
+    const row = document.createElement('div');
+    row.className = 'msg ai';
+    row.innerHTML = `
+      <div class="avatar ai">
+        <img src="./assets/Kaizen B.png" alt="ai">
+      </div>
+      <div>
+        <div class="bubble">
+          <span class="typing"><span class="dot"></span><span class="dot"></span><span class="dot"></span></span>
+        </div>
+        <div class="meta">SSOMA – Kaizen</div>
+      </div>`;
+    messagesEl.appendChild(row);
+    scrollToBottom();
+    return row;
+  }
+
+  const sendBtn = $('#send');
+  const input = $('#input');
+  const fileInput = $('#file');
+
+  const attachFloat = $('#attachFloat');
+  const afBody = $('#afBody');
+  const afEdit = $('#afEdit');
+  const afClear = $('#afClear');
+
+  let selectedFile = null;
+
+  fileInput.addEventListener('change', e => {
+    const f = e.target.files[0];
+    if (!f) {
+      clearAttachment();
+      return;
+    }
+    selectedFile = f;
+    attachFloat.style.display = 'flex';
+    afBody.textContent = `${f.name} (${(f.size / 1024).toFixed(1)} KB)`;
+  });
+
+  function clearAttachment() {
+    selectedFile = null;
+    attachFloat.style.display = 'none';
+    afBody.textContent = '';
+    fileInput.value = '';
+  }
+
+  afClear.addEventListener('click', clearAttachment);
+  afEdit.addEventListener('click', () => fileInput.click());
+
+  function fileToBase64(file) {
+    return new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => {
+        const base64 = String(r.result || '');
+        const idx = base64.indexOf('base64,');
+        if (idx >= 0) {
+          resolve(base64.slice(idx + 7));
+        } else {
+          resolve(base64);
         }
-      }
-      store.threads[tid].ts = Date.now();
-      saveStore(store);
-    }
-    function renderSidebar(){
-      const {threads,lastThreadId} = loadStore();
-      const list = document.getElementById('convList');
-      const items = Object.entries(threads)
-        .sort((a,b)=>b[1].ts - a[1].ts)
-        .map(([tid,data])=>{
-          const div = document.createElement('div');
-          div.className = 'conv'+(tid===lastThreadId?' active':'');
-          div.innerHTML = `<div class="t">${data.title||'(sin título)'}</div><div class="s">${new Date(data.ts).toLocaleString()}</div>`;
-          div.onclick = ()=>loadConversation(tid);
-          return div;
-        });
-      list.innerHTML = '';
-      items.forEach(el=>list.appendChild(el));
-    }
-    function loadConversation(tid){
-      const store = loadStore();
-      if(!store.threads[tid]) return;
-      localStorage.setItem('THREAD_ID', tid);
-      THREAD_ID = tid;
-      store.lastThreadId = tid;
-      saveStore(store);
-
-      messagesEl.innerHTML = '';
-      for(const m of store.threads[tid].messages){
-        addMessage(m.role, m.html, m.attName);
-      }
-      renderSidebar();
-      scrollToBottom();
-    }
-
-    // ===== UI helpers =====
-    const $ = sel => document.querySelector(sel);
-    const messagesEl = $('#messages');
-
-    function scrollToBottom(){ messagesEl.scrollTop = messagesEl.scrollHeight + 999; }
-
-    function escapeHtml(s){ return s.replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
-
-    // Markdown mínimo: **negrita**, *itálica*, listas, saltos de línea
-    function renderMarkdown(md){
-      if(!md) return '';
-      let s = escapeHtml(md);
-      // listas con - o números
-      s = s.replace(/(^|\n)\s*-\s+(.*)/g, '$1• $2');
-      s = s.replace(/(^|\n)\s*\d+\.\s+(.*)/g, '$1$2'); // deja el número si quieres, aquí lo simplifico
-      // negritas e itálicas (no anidadas complejas)
-      s = s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-      s = s.replace(/\*(.+?)\*/g, '<em>$1</em>');
-      // saltos de línea
-      s = s.replace(/\n/g, '<br>');
-      return s;
-    }
-
-    function msgRow(role, html){
-      const row = document.createElement('div');
-      row.className = `msg ${role}`;
-      row.innerHTML = `
-        <div class="avatar ${role}">
-          <img src="${role==='ai'? './assets/Kaizen B.png':'./assets/Icon App.png'}" alt="${role}">
-        </div>
-        <div>
-          <div class="bubble">${html}</div>
-          <div class="meta">${role==='ai'?'Kaizen Software':'Tú'}</div>
-        </div>`;
-      messagesEl.appendChild(row);
-      scrollToBottom();
-      return row;
-    }
-    function addMessage(role, html, attName){
-      const extra = attName ? `<div class="file-chip"><span class="badge">ADJUNTO</span>${escapeHtml(attName)}</div>` : '';
-      return msgRow(role, (html||'')+extra);
-    }
-    function typingBubble(){
-      const row = document.createElement('div');
-      row.className = 'msg ai';
-      row.innerHTML = `
-        <div class="avatar ai">
-          <img src="./assets/Kaizen B.png" alt="ai">
-        </div>
-        <div>
-          <div class="bubble">
-            <span class="typing"><span class="dot"></span><span class="dot"></span><span class="dot"></span></span>
-          </div>
-          <div class="meta">SSOMA – Kaizen</div>
-        </div>`;
-      messagesEl.appendChild(row);
-      scrollToBottom();
-      return row;
-    }
-
-    // ===== Composer / Preview flotante =====
-    const sendBtn = $('#send');
-    const input = $('#input');
-    const fileInput = $('#file');
-
-    const attachFloat = $('#attachFloat');
-    const afBody = $('#afBody');
-    const afEdit = $('#afEdit');
-    const afClear = $('#afClear');
-
-    let selectedFile = null;
-    fileInput.addEventListener('change', async (e)=>{
-      const f = e.target.files[0];
-      if(!f){ hideAttach(); return; }
-      selectedFile = f;
-      showAttachPreview(f);
+      };
+      r.onerror = reject;
+      r.readAsDataURL(file);
     });
-    afEdit.onclick = () => fileInput.click();
-    afClear.onclick = () => { clearAttachment(); };
+  }
 
-    function clearAttachment(){
-      selectedFile = null;
-      fileInput.value = '';
-      hideAttach();
-    }
-    function hideAttach(){ attachFloat.style.display = 'none'; afBody.innerHTML=''; }
-    function showAttachPreview(f){
-      const isImage = /^image\//.test(f.type);
-      attachFloat.style.display = 'block';
-      if(isImage){
-        const url = URL.createObjectURL(f);
-        afBody.innerHTML = `
-          <div class="file-row">
-            <div class="thumb"><img src="${url}" alt="preview"></div>
-            <div class="file-name">${escapeHtml(f.name)}</div>
-          </div>`;
-      }else{
-        afBody.innerHTML = `
-          <div class="file-row">
-            <div class="file-icon">📄</div>
-            <div class="file-name">${escapeHtml(f.name)}</div>
-          </div>`;
-      }
+  async function sendQuery({ text, file }) {
+    const body = { session_id: SESSION_ID };
+    if (THREAD_ID) body.thread_id = THREAD_ID;
+    if (text) body.text = text;
+
+    if (file) {
+      if (file.size > 25 * 1024 * 1024) throw new Error('El archivo supera 25MB');
+      const base64 = await fileToBase64(file);
+      body.files = [{ filename: file.name, base64 }];
     }
 
-    // ===== Llamada al backend =====
-    async function fileToBase64(file){
-      return new Promise((resolve, reject)=>{
-        const r = new FileReader();
-        r.onload = () => {
-          const s = String(r.result);
-          const comma = s.indexOf(',');
-          resolve(s.slice(comma+1));
-        };
-        r.onerror = reject;
-        r.readAsDataURL(file);
-      });
-    }
-    async function sendQuery({ text, file }){
-      const body = { session_id: SESSION_ID };
-      if (THREAD_ID) body.thread_id = THREAD_ID;
-      if (text) body.text = text;
-
-      if (file){
-        if (file.size > 25*1024*1024) throw new Error('El archivo supera 25MB');
-        const base64 = await fileToBase64(file);
-        body.files = [{ filename: file.name, base64 }];
-      }
-      if (!body.text && !body.files) throw new Error('Debes enviar mensaje y/o adjunto.');
-
-      const res = await fetch(`${API}/chat/query`, {
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body:JSON.stringify(body)
-      });
-      return res.json();
+    if (!body.text && !body.files) {
+      throw new Error('Debes enviar mensaje y/o adjuntar un archivo.');
     }
 
-    async function onSend(){
-      const text = input.value.trim();
-      const file = selectedFile;
+    const res = await fetch(`${API}/chat/query`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    return res.json();
+  }
 
-      if (!text && !file){
-        addMessage('ai', renderMarkdown('Debes enviar un mensaje y/o adjuntar un archivo.'));
-        return;
-      }
+  async function onSend() {
+    const text = input.value.trim();
+    const file = selectedFile;
 
-      // Limpia input INMEDIATAMENTE
-      input.value = '';
+    if (!text && !file) {
+      addMessage('ai', renderMarkdown('Debes enviar un mensaje y/o adjuntar un archivo.'));
+      return;
+    }
 
-      // Muestra tu mensaje y adjunto
-      const html = renderMarkdown(text || '(sin texto)');
-      addMessage('user', html, file ? file.name : undefined);
+    input.value = '';
 
-      // Estado UI
-      sendBtn.disabled = true; sendBtn.textContent = '…';
-      const typing = typingBubble();
+    const html = renderMarkdown(text || '(sin texto)');
+    addMessage('user', html, file ? file.name : undefined);
 
-      try{
-        const data = await sendQuery({ text, file });
-        // limpia adjunto justo después de enviar (independiente de la respuesta)
-        clearAttachment();
+    sendBtn.disabled = true;
+    sendBtn.textContent = '…';
+    const typing = typingBubble();
 
-        if (data.error){
-          typing.remove();
-          addMessage('ai', renderMarkdown('❌ ' + data.error));
-        }else{
-          if (data.thread_id && data.thread_id !== THREAD_ID){
-            THREAD_ID = data.thread_id;
-            localStorage.setItem('THREAD_ID', THREAD_ID);
-          }
-          typing.remove();
-          const replyHtml = renderMarkdown(data.reply || '(sin respuesta de texto)');
-          addMessage('ai', replyHtml);
+    try {
+      const data = await sendQuery({ text, file });
+      clearAttachment();
 
-          // Persistir mensajes en historial
-          pushMessage(THREAD_ID, { role:'user', html, raw:text, attName: file ? file.name : null });
-          pushMessage(THREAD_ID, { role:'ai', html:replyHtml, raw:data.reply });
+      if (data.error) {
+        typing.remove();
+        addMessage('ai', renderMarkdown('❌ ' + data.error));
+      } else {
+        if (data.thread_id && data.thread_id !== THREAD_ID) {
+          THREAD_ID = data.thread_id;
+          localStorage.setItem('THREAD_ID', THREAD_ID);
+        }
+        typing.remove();
+        const replyHtml = renderMarkdown(data.reply || '(sin respuesta de texto)');
+        addMessage('ai', replyHtml);
+
+        if (THREAD_ID) {
+          pushMessage(THREAD_ID, { role: 'user', html, raw: text, attName: file ? file.name : null });
+          pushMessage(THREAD_ID, { role: 'ai', html: replyHtml, raw: data.reply });
           renderSidebar();
         }
-      }catch(err){
-        clearAttachment();
-        typing.remove();
-        addMessage('ai', renderMarkdown('❌ Error: '+err.message));
-      }finally{
-        sendBtn.disabled = false; sendBtn.textContent = '➤';
       }
+    } catch (err) {
+      typing.remove();
+      addMessage('ai', renderMarkdown('❌ Error: ' + (err.message || String(err))));
+    } finally {
+      sendBtn.disabled = false;
+      sendBtn.textContent = 'Enviar';
     }
+  }
 
-    // ===== Eventos =====
-    sendBtn.addEventListener('click', onSend);
-    input.addEventListener('keydown', e=>{ if(e.key==='Enter') onSend(); });
+  function newChat() {
+    const store = loadStore();
+    THREAD_ID = null;
+    localStorage.removeItem('THREAD_ID');
+    messagesEl.innerHTML = '';
+    renderSidebar();
+    addMessage('ai', renderMarkdown('Nuevo chat iniciado. ¿En qué puedo ayudarte?'));
+    saveStore(store);
+  }
 
-    // Reset: nuevo thread en backend, conservar historial de los anteriores
-    async function newChat(){
-      const res = await fetch(`${API}/session/reset`, {
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({ session_id: SESSION_ID })
-      });
-      const d = await res.json();
-      THREAD_ID = d.thread_id;
-      localStorage.setItem('THREAD_ID', THREAD_ID);
-      ensureThreadStore(THREAD_ID);
-      messagesEl.innerHTML = '';
-      addMessage('ai', renderMarkdown('Nuevo chat iniciado. ¿En qué puedo ayudarte?'));
-      renderSidebar();
+  sendBtn.addEventListener('click', onSend);
+
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      onSend();
     }
-    // Si mantienes tu botón externo con id "reset", puedes engancharlo:
-    document.addEventListener('click', (e)=>{
-      if(e.target && e.target.id==='reset'){ newChat(); }
-    });
+  });
 
-    // ===== Inicialización =====
-    // 1) Si hay último thread con historial, cargarlo; si no, bienvenida
-    (function init(){
-      const store = loadStore();
-      if(THREAD_ID && store.threads[THREAD_ID]?.messages?.length){
-        loadConversation(THREAD_ID);
-      }else{
-        addMessage('ai', renderMarkdown('¡Hola! Soy **Kaizen GPT**. Puedes escribir tu consulta y/o adjuntar una imagen o documento relacionado a seguridad ocupacional o recursos Humanos.'));
-      }
-      renderSidebar();
-      // Asegura que exista entrada para el thread actual
-      if(THREAD_ID) ensureThreadStore(THREAD_ID);
-    })();
-  </script>
+  document.addEventListener('click', e => {
+    if (e.target && e.target.id === 'reset') {
+      newChat();
+    }
+  });
+
+  (function init() {
+    const store = loadStore();
+    if (THREAD_ID && store.threads[THREAD_ID]?.messages?.length) {
+      loadConversation(THREAD_ID);
+    } else {
+      addMessage(
+        'ai',
+        renderMarkdown(
+          '¡Hola! Soy **Kaizen GPT**. Puedo ayudarte con consultas relacionadas a SSOMA, seguridad ocupacional y Recursos Humanos.'
+        )
+      );
+    }
+    renderSidebar();
+    if (THREAD_ID) ensureThreadStore(THREAD_ID);
+  })();
+</script>
 </body>
 </html>
