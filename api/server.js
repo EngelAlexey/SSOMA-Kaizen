@@ -1,3 +1,4 @@
+import cors from "cors";
 import express from "express";
 import multer from "multer";
 import fs from "fs";
@@ -16,6 +17,21 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const upload = multer({ dest: "uploads/" });
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+app.use(
+  cors({
+    origin: [
+      "https://ssoma-kaizen-web.onrender.com",
+      "http://localhost:5173",
+      "http://localhost:3000",
+    ],
+    methods: ["GET", "POST", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+  })
+);
+
+app.options("*", cors());
+
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
