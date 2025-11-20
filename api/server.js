@@ -1,5 +1,5 @@
-import cors from "cors";
 import express from "express";
+import cors from "cors";
 import multer from "multer";
 import fs from "fs";
 import path from "path";
@@ -15,8 +15,34 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-const upload = multer({ dest: "uploads/" });
-const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+const MAX_UPLOAD_SIZE_MB = parseInt(process.env.MAX_UPLOAD_SIZE_MB || "10", 10);
+const MAX_UPLOAD_FILES = parseInt(process.env.MAX_UPLOAD_FILES || "5", 10);
+const ALLOWED_MIMETYPES = [
+  "image/png",
+  "image/jpeg",
+  "image/jpg",
+  "image/webp",
+  "application/pdf",
+];
+
+const upload = multer({
+  dest: "uploads/",
+  limits: {
+    fileSize: MAX_UPLOAD_SIZE_MB * 1024 * 1024,
+    files: MAX_UPLOAD_FILES,
+  },
+  fileFilter: (req, file, cb) => {
+    if (ALLOWED_MIMETYPES.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      const error = new Error("UNSUPPORTED_FILE_TYPE");
+      error.type = "UNSUPPORTED_FILE_TYPE";
+      cb(error);
+    }
+  },
+});
+
 
 app.use(
   cors({
@@ -52,33 +78,68 @@ Sé claro, directo y concreto (uno o dos párrafos y, si hace falta, una lista c
 
 const sessions = loadSessions();
 
-app.post("/chat/query", upload.array("files"), async (req, res) => {
+const handleUpload = (req, res, next) => {
+  upload.array("files")(req, res, (err) => {
+    if (!err) return next();
+
+    if (err.type === "UNSUPPORTED_FILE_TYPE") {
+      return res.status(400).json({
+        error: "unsupported_file_type",
+        message:
+          "El tipo de archivo no es compatible. Solo se permiten imágenes (JPG, PNG, WEBP) y archivos PDF.",
+      });
+    }
+
+    if (err instanceof multer.MulterError && err.code === "LIMIT_FILE_SIZE") {
+      return res.status(400).json({
+        error: "file_too_large",
+        message: `El archivo es demasiado grande. El tamaño máximo permitido es de ${MAX_UPLOAD_SIZE_MB} MB.`,
+      });
+    }
+
+    console.error("Error en subida de archivos:", err);
+    return res.status(500).json({
+      error: "upload_failed",
+      message: "Ocurrió un error al procesar los archivos adjuntos.",
+    });
+  });
+};
+
+
+app.post("/chat/query", handleUpload, async (req, res) => {
   try {
     const {
       session_id,
       thread_id: clientThreadId,
       text,
       message,
-      files = [],
       urls = [],
       drive_paths = [],
       drive_ids = [],
       meta,
     } = req.body;
 
-    const effectiveText = typeof message === "string" && message.length ? message : text || "";
+    const effectiveText =
+      typeof message === "string" && message.length ? message : text || "";
     const trimmedText = (effectiveText || "").trim();
 
+    const uploadedFiles = req.files || [];
+
     const hasAnyFile =
-      (files?.length || 0) +
-      (urls?.length || 0) +
-      (drive_paths?.length || 0) +
-      (drive_ids?.length || 0) >
+      (uploadedFiles.length || 0) +
+        (urls?.length || 0) +
+        (drive_paths?.length || 0) +
+        (drive_ids?.length || 0) >
       0;
 
-    if (!session_id) return res.status(400).json({ error: "session_id requerido" });
-    if (!trimmedText && !hasAnyFile)
-      return res.status(400).json({ error: "Debe enviar mensaje y/o adjuntos" });
+    if (!session_id) {
+      return res.status(400).json({ error: "session_id requerido" });
+    }
+    if (!trimmedText && !hasAnyFile) {
+      return res
+        .status(400)
+        .json({ error: "Debe enviar mensaje y/o adjuntos" });
+    }
 
     if (!hasAnyFile && trimmedText.length > 0 && trimmedText.length <= 2)
       return res.json({
@@ -134,7 +195,6 @@ app.post("/chat/query", upload.array("files"), async (req, res) => {
     }
 
     const allFileIds = [];
-    const uploadedFiles = req.files || [];
     for (const f of uploadedFiles) {
       const file = await client.files.create({
         file: fs.createReadStream(f.path),
