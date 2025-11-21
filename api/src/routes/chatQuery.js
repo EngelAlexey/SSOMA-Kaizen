@@ -17,7 +17,6 @@ export async function handleChatQuery(req, res) {
 
     let faceResults = [];
 
-    // Reconocimiento facial si hay imágenes
     if (files.length > 0) {
       for (const file of files) {
         const formData = new FormData();
@@ -40,7 +39,6 @@ export async function handleChatQuery(req, res) {
       }
     }
 
-    // Construir mensajes para OpenAI
     const messages = [
       { 
         role: 'system', 
@@ -48,10 +46,8 @@ export async function handleChatQuery(req, res) {
       }
     ];
 
-    // Construir el contenido del mensaje del usuario
     const userContent = [];
 
-    // Agregar texto si existe
     if (text) {
       userContent.push({
         type: 'text',
@@ -59,7 +55,6 @@ export async function handleChatQuery(req, res) {
       });
     }
 
-    // Si hay archivos, convertirlos a base64 y agregarlos
     if (files.length > 0) {
       const promptText = `Analiza las siguientes imágenes de la obra y responde:
 
@@ -79,26 +74,22 @@ Sé específico y práctico en tus recomendaciones.`;
         text: promptText
       });
 
-      // Agregar cada imagen en base64
       for (const file of files) {
         const imageBuffer = fs.readFileSync(file.path);
         const base64Image = imageBuffer.toString('base64');
-        
-        // Detectar tipo MIME
         const mimeType = file.mimetype || 'image/jpeg';
         
         userContent.push({
           type: 'image_url',
           image_url: {
             url: `data:${mimeType};base64,${base64Image}`,
-            detail: 'high' // Para análisis detallado
+            detail: 'high'
           }
         });
 
         console.log('🖼️ Imagen agregada al análisis:', file.filename, mimeType);
       }
     } else {
-      // Si no hay imágenes, solo texto
       userContent.push({
         type: 'text',
         text: text || 'Hola, ¿cómo puedo ayudarte con seguridad ocupacional?'
@@ -112,7 +103,6 @@ Sé específico y práctico en tus recomendaciones.`;
 
     console.log('🤖 Enviando a OpenAI...');
 
-    // Llamada a OpenAI con las imágenes
     const completion = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
       messages: messages,
@@ -143,12 +133,13 @@ Sé específico y práctico en tus recomendaciones.`;
 
   } catch (error) {
     console.error('❌ Error en handleChatQuery:', error);
-
+    
     if (req.files) {
       req.files.forEach(file => {
         try {
           fs.unlinkSync(file.path);
-        } catch (err) {        }
+        } catch (err) {
+        }
       });
     }
 
