@@ -1,5 +1,19 @@
 {
+  "name": "ssoma-frontend",
+  "version": "1.0.0",
+  "type": "module",
   "dependencies": {
-    "multer": "^2.0.2"
-  }
+    "cors": "^2.8.5",
+    "dotenv": "^16.6.1",
+    "express": "^4.21.2",
+    "googleapis": "^159.0.0",
+    "multer": "^2.0.2",
+    "openai": "^4.104.0"
+  },
+  "scripts": {
+    "start": "node chatQuery.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
 }

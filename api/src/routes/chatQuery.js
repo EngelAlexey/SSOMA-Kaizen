@@ -10,10 +10,10 @@ const FACE_API_URL = process.env.FACE_API_URL || 'https://ssoma-kaizen-api.onren
 
 export async function handleChatQuery(req, res) {
   try {
-    const { text, projectId, staffId, clockId } = req.body;
+    const { text, projectId, staffId, clockId, session_id, thread_id } = req.body;
     const files = req.files || [];
 
-    console.log('📝 Recibida consulta:', { text, projectId, staffId, clockId, filesCount: files.length });
+    console.log('📝 Recibida consulta:', { text, projectId, staffId, clockId, session_id, thread_id, filesCount: files.length });
 
     let faceResults = [];
 
@@ -124,12 +124,19 @@ Sé específico y práctico en tus recomendaciones.`;
       }
     });
 
-    return res.json({
+    const responseData = {
       success: true,
+      reply: reply,
       message: reply,
       faceResults,
-      tokensUsed: completion.usage?.total_tokens || 0
-    });
+      tokensUsed: completion.usage?.total_tokens || 0,
+      thread_id: thread_id || `thread_${Date.now()}`,
+      session_id: session_id || 'default'
+    };
+
+    console.log('📤 Enviando respuesta al frontend');
+
+    return res.json(responseData);
 
   } catch (error) {
     console.error('❌ Error en handleChatQuery:', error);
@@ -146,7 +153,8 @@ Sé específico y práctico en tus recomendaciones.`;
     return res.status(500).json({ 
       success: false,
       error: 'server_error', 
-      message: error.message 
+      message: error.message,
+      reply: 'Lo siento, ocurrió un error al procesar tu consulta.'
     });
   }
 }
