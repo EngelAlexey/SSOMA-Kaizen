@@ -1,19 +1,18 @@
 {
-  "name": "ssoma-chat",
+  "name": "ssoma-api",
   "version": "1.0.0",
   "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
   "dependencies": {
+    "axios": "^1.7.7",
     "cors": "^2.8.5",
     "dotenv": "^16.6.1",
     "express": "^4.21.2",
-    "googleapis": "^159.0.0",
-    "multer": "^2.0.2",
-    "openai": "^4.104.0"
-  },
-  "description": "",
-  "main": "prueba.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "multer": "^2.0.2"
   },
   "keywords": [],
   "author": "",
