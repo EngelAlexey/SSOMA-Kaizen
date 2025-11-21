@@ -5,14 +5,36 @@ import FormData from 'form-data';
 import OpenAI from 'openai';
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-
 const FACE_API_URL = process.env.FACE_API_URL || 'https://ssoma-kaizen-api.onrender.com';
+const UPLOAD_DIR = path.join(process.cwd(), 'uploads');
 
 export async function handleChatQuery(req, res) {
+  const tempPaths = [];
   try {
-    const { text, projectId, staffId, clockId, session_id, thread_id } = req.body;
-    const files = req.files || [];
+    const { text, projectId, staffId, clockId, session_id, thread_id } = req.body || {};
+    const uploads = [];
 
+    if (Array.isArray(req.body?.files)) {
+      for (const f of req.body.files) {
+        if (!f?.base64) continue;
+        const ext = path.extname(f.filename || '') || '.jpg';
+        const tmpPath = path.join(UPLOAD_DIR, `${Date.now()}-${Math.random().toString(16).slice(2)}${ext}`);
+        const buffer = Buffer.from(f.base64, 'base64');
+        fs.writeFileSync(tmpPath, buffer);
+        tempPaths.push(tmpPath);
+        uploads.push({
+          filename: f.filename || path.basename(tmpPath),
+          path: tmpPath,
+          mimetype: f.mimetype || 'image/jpeg'
+        });
+      }
+    }
+
+    if (Array.isArray(req.files)) {
+      uploads.push(...req.files);
+    }
+
+    const files = uploads;
     console.log('📝 Recibida consulta:', { text, projectId, staffId, clockId, session_id, thread_id, filesCount: files.length });
 
     let faceResults = [];
@@ -40,9 +62,9 @@ export async function handleChatQuery(req, res) {
     }
 
     const messages = [
-      { 
-        role: 'system', 
-        content: 'Eres SSOMA-Kaizen, un asistente experto en salud ocupacional y seguridad en construcción. Analiza imágenes de obras para identificar actos inseguros, riesgos y medidas preventivas.' 
+      {
+        role: 'system',
+        content: 'Eres SSOMA-Kaizen, un asistente experto en salud ocupacional y seguridad en construcción. Analiza imágenes de obras para identificar actos inseguros, riesgos y medidas preventivas.'
       }
     ];
 
@@ -78,7 +100,7 @@ Sé específico y práctico en tus recomendaciones.`;
         const imageBuffer = fs.readFileSync(file.path);
         const base64Image = imageBuffer.toString('base64');
         const mimeType = file.mimetype || 'image/jpeg';
-        
+
         userContent.push({
           type: 'image_url',
           image_url: {
@@ -137,24 +159,28 @@ Sé específico y práctico en tus recomendaciones.`;
     console.log('📤 Enviando respuesta al frontend');
 
     return res.json(responseData);
-
   } catch (error) {
     console.error('❌ Error en handleChatQuery:', error);
-    
+
     if (req.files) {
       req.files.forEach(file => {
         try {
           fs.unlinkSync(file.path);
-        } catch (err) {
-        }
+        } catch (err) {}
       });
     }
 
-    return res.status(500).json({ 
+    return res.status(500).json({
       success: false,
-      error: 'server_error', 
+      error: 'server_error',
       message: error.message,
       reply: 'Lo siento, ocurrió un error al procesar tu consulta.'
+    });
+  } finally {
+    tempPaths.forEach(p => {
+      try {
+        fs.unlinkSync(p);
+      } catch (err) {}
     });
   }
 }
