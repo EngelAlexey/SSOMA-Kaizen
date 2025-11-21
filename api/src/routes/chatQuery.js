@@ -4,8 +4,9 @@ import path from 'path';
 import FormData from 'form-data';
 import OpenAI from 'openai';
 
+
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-const FACE_API_URL = process.env.FACE_API_URL || 'https://ssoma-kaizen-api.onrender.com';
+const FACE_API_URL = process.env.FACE_API_URL || 'https://facerecognition-kgjd.onrender.com';
 const UPLOAD_DIR = path.join(process.cwd(), 'uploads');
 
 export async function handleChatQuery(req, res) {
