@@ -401,3 +401,64 @@ main { display: flex; flex-direction: column; height: 100%; overflow: hidden; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: #555; }
+
+/* --- ESTILOS NUEVOS PARA PREVIEW --- */
+
+/* Contenedor de Preview (Encima del input) */
+#file-preview-area {
+    display: flex; gap: 8px; flex-wrap: wrap; padding: 8px 0;
+}
+
+.file-preview-card {
+    width: 80px; height: 80px;
+    border-radius: 8px;
+    background: #2a2a2a;
+    border: 1px solid var(--panel-border);
+    position: relative;
+    background-size: cover;
+    background-position: center;
+    display: flex; align-items: flex-end;
+    overflow: hidden;
+}
+
+.file-preview-card:not(.is-image) {
+    display: flex; align-items: center; justify-content: center;
+    background: #1a1c20;
+}
+.file-preview-card:not(.is-image)::before {
+    content: '📄'; font-size: 24px;
+}
+
+.file-info {
+    width: 100%; background: rgba(0,0,0,0.7);
+    font-size: 9px; color: white; padding: 2px;
+    text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+.file-remove {
+    position: absolute; top: -5px; right: -5px;
+    background: var(--primary); color: white;
+    border: none; border-radius: 50%;
+    width: 20px; height: 20px; cursor: pointer;
+    font-size: 12px; line-height: 1;
+}
+
+/* Imágenes en el chat */
+.msg-files {
+    display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px;
+}
+.msg-img {
+    max-width: 250px; max-height: 250px;
+    border-radius: 8px; border: 1px solid var(--panel-border);
+    cursor: pointer; transition: transform 0.2s;
+}
+.msg-img:hover { transform: scale(1.02); }
+
+/* Mensajes de Sistema (Errores) */
+.system-msg {
+    width: 90%; margin: 10px auto; padding: 10px;
+    background: rgba(255, 50, 50, 0.1);
+    border: 1px solid rgba(255, 50, 50, 0.3);
+    color: #ff8a80; text-align: center;
+    border-radius: 8px; font-size: 13px;
+}
