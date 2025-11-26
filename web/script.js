@@ -49,6 +49,7 @@ const app = {
     },
 
     bindEvents() {
+        // Vincular función sendMessage al contexto de 'app'
         dom.sendBtn.addEventListener('click', () => this.sendMessage());
         
         dom.input.addEventListener('keydown', (e) => {

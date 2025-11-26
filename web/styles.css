@@ -214,7 +214,7 @@ main { display: flex; flex-direction: column; height: 100%; overflow: hidden; }
 .avatar img { width: 18px; height: 18px; object-fit: contain; }
 
 .bubble {
-  max-width: 800px; /* Limita el ancho del texto para lectura cómoda */
+  max-width: 100%; /* El contenedor padre controla el ancho */
   padding: 0;
   line-height: 1.6;
   font-size: 14px;
@@ -232,20 +232,26 @@ main { display: flex; flex-direction: column; height: 100%; overflow: hidden; }
 
 .ai .bubble {
   background: transparent;
-  color: #d1d5db;
+  padding-left: 0;
+  padding-top: 0;
+  color: #e6e8ea;
 }
 
-/* Meta (Etiqueta de nombre) */
+/* Meta (Etiqueta de nombre) - MUY SUTIL */
 .meta {
   font-size: 10px; 
-  color: #444; /* Muy sutil, casi invisible */
-  margin-top: 4px;
+  color: #333; /* Casi invisible, para estructura */
+  margin-top: 2px;
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.5px;
+  opacity: 0; /* Oculto por defecto para limpieza */
+  transition: opacity 0.2s;
 }
+.msg:hover .meta { opacity: 0.5; } /* Aparece al pasar el mouse */
+
 .user .meta { text-align: right; margin-right: 4px; }
-.ai .meta { text-align: left; margin-left: 2px; color: var(--primary); opacity: 0.8; }
+.ai .meta { text-align: left; margin-left: 2px; color: var(--primary); }
 
 
 /* Markdown Styles */
@@ -292,12 +298,19 @@ main { display: flex; flex-direction: column; height: 100%; overflow: hidden; }
   border-top: 1px solid var(--panel-border);
   padding: 20px;
   display: flex;
-  justify-content: center; /* Centrar el input */
+  justify-content: center; 
+}
+
+.bar-container {
+    width: 100%;
+    max-width: 768px; /* Ancho estilo ChatGPT */
+    display: flex;
+    flex-direction: column;
+    align-items: center;
 }
 
 .bar {
   width: 100%;
-  max-width: 800px; /* Limitar ancho para elegancia */
   display: flex; align-items: flex-end; gap: 12px;
   background: rgba(255,255,255,0.03);
   border: 1px solid var(--panel-border);
@@ -322,7 +335,7 @@ main { display: flex; flex-direction: column; height: 100%; overflow: hidden; }
   resize: none;
   outline: none;
   max-height: 150px;
-  padding: 10px 4px;
+  padding: 8px 5px;
   line-height: 1.5;
 }
 .field textarea::placeholder { color: #555; }
@@ -347,10 +360,9 @@ main { display: flex; flex-direction: column; height: 100%; overflow: hidden; }
 .btn-send:disabled { opacity: 0.3; cursor: not-allowed; transform: none; background: #333; }
 
 .hint { 
-  text-align: center; 
-  position: absolute; bottom: 4px; left: 0; right: 0;
+  margin-top: 10px; 
   font-size: 10px; color: #444; 
-  pointer-events: none;
+  text-align: center;
 }
 
 /* --- PREVIEW FLOTANTE --- */
