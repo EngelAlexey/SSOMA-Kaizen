@@ -9,12 +9,12 @@ const MANUAL_KAIZEN = `
 MATRIZ DE USO KAIZEN (RESUMEN):
 1. PERMISOS: Inicio > Permisos > +Agregar.
 2. EMPRESAS: Inicio > Empresas.
-3. HORARIOS: Inicio > Horarios (Configurar tolerancias).
-4. PROYECTOS: Inicio > Proyectos (Vincular GPS).
-5. USUARIOS: Inicio > Usuarios (Correo Google).
-6. PARÁMETROS: Inicio > Parámetros (CCSS/Renta).
+3. HORARIOS: Inicio > Horarios.
+4. PROYECTOS: Inicio > Proyectos.
+5. USUARIOS: Inicio > Usuarios.
+6. PARÁMETROS: Inicio > Parámetros.
 7. CENTROS DE COSTOS: Inicio > Centros Costos.
-8. PUESTOS: Inicio > Puestos (Factores extras).
+8. PUESTOS: Inicio > Puestos.
 9. PERSONAL: Expediente, Foto, Contratos.
 10. RELOJ APP: Licencia, QR, Marca Rápida.
 11. ASISTENCIAS: Revisar y Recalcular.
@@ -35,7 +35,7 @@ SEGURIDAD (CRITERIO TÉCNICO):
 
 const PROJECT_ID = process.env.PROJECT_ID || 'causal-binder-459316-v6';
 const LOCATION = process.env.LOCATION || 'us-central1';
-const MODEL_ID = 'gemini-1.5-flash-001';
+const MODEL_ID = 'gemini-1.5-flash-002';
 const FACE_API_URL = process.env.FACE_API_URL;
 const UPLOAD_DIR = path.join(process.cwd(), 'uploads');
 
@@ -45,7 +45,7 @@ const safeDelete = (filePath) => {
   try {
     if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
   } catch (err) {
-    console.warn(`⚠️ No se pudo borrar temporal: ${path.basename(filePath)} (Posiblemente bloqueado)`);
+    console.warn(`⚠️ No se pudo borrar temporal: ${path.basename(filePath)}`);
   }
 };
 
@@ -54,8 +54,6 @@ export async function handleChatQuery(req, res) {
 
   try {
     const { text, projectId } = req.body || {};
-    
-
     const uploads = [];
     
     if (req.files && req.files.length > 0) {
@@ -64,7 +62,7 @@ export async function handleChatQuery(req, res) {
         filesToDelete.push(f.path);
       });
     }
-
+    
     if (req.body.files && Array.isArray(req.body.files)) {
       for (const f of req.body.files) {
         if (f.base64) {
@@ -101,16 +99,13 @@ export async function handleChatQuery(req, res) {
           if (faceRes.data && !faceRes.data.error) {
              faceResults.push({ file: file.originalname, ...faceRes.data });
           }
-
           stream.destroy(); 
-        } catch (err) {
-          console.warn('⚠️ Face API saltado:', err.message);
-        }
+        } catch (err) {}
       }
     }
 
     const vertex_ai = new VertexAI({ project: PROJECT_ID, location: LOCATION });
-    const model = vertex_ai.getGenerativeModel({
+    const model = vertex_ai.preview.getGenerativeModel({
       model: MODEL_ID,
       systemInstruction: {
         parts: [{ text: `
@@ -143,6 +138,7 @@ export async function handleChatQuery(req, res) {
 
     for (const file of uploads) {
       const fileBuffer = fs.readFileSync(file.path);
+      
       const isText = file.mimetype.match(/text|json|csv|xml/);
       
       if (isText) {
@@ -185,7 +181,6 @@ export async function handleChatQuery(req, res) {
       details: error.message 
     });
   } finally {
-
     setTimeout(() => {
       filesToDelete.forEach(p => safeDelete(p));
     }, 1000); 
