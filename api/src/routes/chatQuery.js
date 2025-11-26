@@ -5,95 +5,62 @@ import FormData from 'form-data';
 import { VertexAI, HarmCategory, HarmBlockThreshold } from '@google-cloud/vertexai';
 import 'dotenv/config';
 
+// --- BASE DE CONOCIMIENTO ---
 const MANUAL_KAIZEN = `
-MATRIZ DE USO KAIZEN:
-1. PERMISOS: Inicio > Permisos > +Agregar. 1. Título. 2. Accesos: Agregar módulo uno por uno. Definir nivel: Contribuir o Administrar. 3. PII Visible. 4. Estado: Habilitado.
-2. EMPRESAS: Inicio > Empresas > +Agregar. 1. Categoría: Cliente, Proveedor o Contratista. 2. Datos: Razón Social e ID Legal. 3. Representante.
-3. HORARIOS: Paso 1: Inicio > Horarios > +Agregar. Definir Modalidad. Paso 2: En Horario Diario, agregar día por día con Hora Entrada/Salida. Paso 3: Configurar Rango entrada desde/hasta.
-4. PROYECTOS: Inicio > Proyectos > +Agregar. 1. Datos: Nombre, Código, GPS. 2. Horario: Seleccionar el horario base.
-5. USUARIOS: Inicio > Usuarios > +Agregar. 1. Datos: Correo Google, Nombre. 2. Tipo: Estándar o Admin. 3. Acceso: Asignar Permiso.
-6. PARÁMETROS: Inicio > Parámetros. 1. CCSS: Actualizar porcentajes. 2. Renta: Actualizar tramos.
-7. CENTROS DE COSTOS: Inicio > Centros de Costos > +Agregar. Definir Nombre y Código. Asociar a Proyectos.
-8. PUESTOS: Inicio > Puestos > +Agregar. 1. Tipo: Operativo o Administrativo. 2. Salario Base. 3. Códigos INS/CCSS.
-9. PERSONAL: Paso 1: +Agregar. Llenar Personal, Contacto, Contrato. Paso 2: Foto biométrica. Paso 3: Generar Contrato PDF/QR. Paso 4: Activar Acceso.
-10. RELOJ APP: Ingreso: Digitar Licencia. Marcar QR: Escanear carnet. Marca Rápida: Seleccionar nombre. Reloj Terminal: Ver historial.
-11. ASISTENCIAS: Automático por Reloj o Manual (+Agregar). Edición: Si se corrigen horas, presionar RECALC.
-12. ACCIONES PERSONAL: Inicio > Acciones de personal > +Agregar. Tipo: Incapacidad, Vacaciones. Fechas.
-13. AJUSTES: Inicio > Ajustes > +Agregar. Tipo: Cuenta por Cobrar o Pagar. Método: Monto o Horas.
-14. PLANILLAS: Paso 1: Crear (Periodo). Paso 2: Resumen. Paso 3: Recalc (si hubo cambios). Paso 4: Enviar.
-15. COMPROBANTES: Inicio > Comprobantes > +Agregar. Seleccionar Planilla. Enviar.
+[RESUMEN MANUAL KAIZEN]
+1. SEGURIDAD (Permisos, Roles). 2. EMPRESAS (Clientes, Contratistas). 3. HORARIOS (Jornadas, Tolerancias).
+4. PROYECTOS (Ubicación, Configuración). 5. USUARIOS (Accesos web). 6. PARÁMETROS (CCSS, Renta).
+7. CENTROS COSTOS (Contabilidad). 8. PUESTOS (Salarios, Factores). 9. PERSONAL (Expedientes, Contratos).
+10. RELOJ (Marcas QR/Facial). 11. ASISTENCIAS (Cálculo horas). 12. ACCIONES (Incapacidades, Vacaciones).
+13. AJUSTES (Deducciones/Bonos). 14. PLANILLAS (Pago, Recalc). 15. COMPROBANTES (Envío).
 `;
 
 const REGLAMENTO_SSOMA = `
-NORMATIVA SEGURIDAD:
-- Alturas: Arnés y línea de vida a partir de 1.8m.
-- Zanjas: Entibado si profundidad > 1.5m.
-- EPP Básico: Casco, chaleco, botas.
-- Art 81: Gafas obligatorias contra impactos/radiación.
+[NORMATIVA SSOMA CR]
+- Alturas >1.8m: Arnés obligatorio. - Zanjas >1.5m: Entibado.
+- EPP: Casco, Botas, Chaleco. - Electricidad: Bloqueo/Etiquetado.
 `;
 
+// --- CONFIGURACIÓN ---
 const PROJECT_ID = process.env.PROJECT_ID || 'causal-binder-459316-v6';
 const LOCATION = process.env.LOCATION || 'us-central1';
-const MODEL_ID = 'gemini-2.0-flash-001';
-
-const vertex_ai = new VertexAI({ project: PROJECT_ID, location: LOCATION });
-
-const generativeModel = vertex_ai.preview.getGenerativeModel({
-  model: MODEL_ID,
-  systemInstruction: {
-    parts: [{ text: `
-      Eres SSOMA-Kaizen.
-      
-      [MANUAL KAIZEN]
-      ${MANUAL_KAIZEN}
-      
-      [REGLAMENTO]
-      ${REGLAMENTO_SSOMA}
-      
-      INSTRUCCIONES:
-      1. App: Cita ruta del manual.
-      2. Seguridad: Cita reglamento.
-      3. Auditoría: Revisa documentos adjuntos buscando errores.
-      4. Alerta: Inicia con "⚠️ PELIGRO" si hay riesgo vital.
-    `}]
-  },
-  generationConfig: {
-    maxOutputTokens: 2048,
-    temperature: 0.2,
-  },
-  safetySettings: [
-    { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
-    { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
-    { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
-    { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH }
-  ]
-});
-
+const MODEL_ID = 'gemini-1.5-flash-001'; // Modelo estable para documentos
 const FACE_API_URL = process.env.FACE_API_URL;
 const UPLOAD_DIR = path.join(process.cwd(), 'uploads');
 
 if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR);
 
+const safeDelete = (filePath) => {
+  try { if (fs.existsSync(filePath)) fs.unlinkSync(filePath); } catch (e) {}
+};
+
+// --- VALIDACIÓN DE SEGURIDAD MEJORADA ---
 async function validateFileSecurity(filePath, mimeType) {
   const buffer = fs.readFileSync(filePath);
   
+  // Firmas digitales (Magic Numbers)
   const signatures = {
     'image/jpeg': [0xFF, 0xD8, 0xFF],
     'image/png': [0x89, 0x50, 0x4E, 0x47],
-    'application/pdf': [0x25, 0x50, 0x44, 0x46]
+    'application/pdf': [0x25, 0x50, 0x44, 0x46],
+    // DOCX y XLSX son archivos ZIP en realidad (Empiezan con PK..)
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': [0x50, 0x4B, 0x03, 0x04],
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': [0x50, 0x4B, 0x03, 0x04]
   };
 
   const header = buffer.subarray(0, 4);
+  
+  // 1. Validar Firma
   if (signatures[mimeType]) {
-    if (!signatures[mimeType].every((byte, index) => header[index] === byte)) {
-        throw new Error(`Firma digital inválida para ${mimeType}`);
-    }
+    const isValid = signatures[mimeType].every((byte, index) => header[index] === byte);
+    if (!isValid) throw new Error(`Firma de archivo corrupta o falsa para ${mimeType}`);
   }
 
+  // 2. Validar Contenido Malicioso en Texto
   if (mimeType.match(/text|json|csv/)) {
     const content = buffer.toString('utf-8').toLowerCase();
     if (content.match(/<script|eval\(|exec\(|powershell|cmd\.exe/)) {
-        throw new Error("Contenido malicioso detectado");
+        throw new Error("Código malicioso detectado en archivo de texto.");
     }
   }
   return true;
@@ -106,112 +73,133 @@ export async function handleChatQuery(req, res) {
     const { text, projectId } = req.body || {};
     const uploads = [];
     
-    if (req.files && req.files.length > 0) {
-      req.files.forEach(f => {
-        uploads.push(f);
-        filesToDelete.push(f.path);
-      });
-    }
+    // Procesar archivos entrantes
+    const rawFiles = [].concat(req.files || []).concat(req.body.files || []);
     
-    if (req.body.files && Array.isArray(req.body.files)) {
-      for (const f of req.body.files) {
-        if (f.base64) {
-          const ext = f.filename ? path.extname(f.filename) : '.jpg';
-          const tmpPath = path.join(UPLOAD_DIR, `b64-${Date.now()}-${Math.random().toString(36).substr(2, 9)}${ext}`);
-          fs.writeFileSync(tmpPath, Buffer.from(f.base64, 'base64'));
-          uploads.push({ 
-            path: tmpPath, 
-            mimetype: f.mimetype || 'image/jpeg', 
-            originalname: f.filename || 'file' 
-          });
-          filesToDelete.push(tmpPath);
-        }
+    // Manejo unificado de archivos (Multer y Base64)
+    for (const f of rawFiles) {
+      let filePath, mime, originalName;
+      
+      if (f.path) { // Viene de Multer
+        filePath = f.path;
+        mime = f.mimetype;
+        originalName = f.originalname;
+      } else if (f.base64) { // Viene de Base64
+        const ext = f.filename ? path.extname(f.filename) : '.bin';
+        filePath = path.join(UPLOAD_DIR, `b64-${Date.now()}-${Math.random().toString(36).substr(2,9)}${ext}`);
+        fs.writeFileSync(filePath, Buffer.from(f.base64, 'base64'));
+        mime = f.mimetype || 'application/octet-stream';
+        originalName = f.filename || 'archivo';
+      }
+
+      if (filePath) {
+        uploads.push({ path: filePath, mimetype: mime, originalname: originalName });
+        filesToDelete.push(filePath);
       }
     }
 
+    // Validar Seguridad
     const validFiles = [];
     for (const file of uploads) {
       try {
         await validateFileSecurity(file.path, file.mimetype);
         validFiles.push(file);
       } catch (e) {
-        console.error(`Archivo rechazado: ${file.originalname}`);
+        console.error(`❌ Archivo rechazado (${file.originalname}): ${e.message}`);
       }
     }
 
+    // Reconocimiento Facial (Solo imágenes)
     let faceResults = [];
     if (validFiles.length > 0 && FACE_API_URL) {
-      const imageFiles = validFiles.filter(f => f.mimetype.startsWith('image/'));
-      for (const file of imageFiles) {
+      const images = validFiles.filter(f => f.mimetype.startsWith('image/'));
+      for (const img of images) {
         try {
-          const stream = fs.createReadStream(file.path);
+          const stream = fs.createReadStream(img.path);
           const formData = new FormData();
           formData.append('file', stream);
-          const faceRes = await axios.post(`${FACE_API_URL}/identify_staff_from_image`, formData, {
-            headers: formData.getHeaders(),
-            timeout: 8000 
+          const resp = await axios.post(`${FACE_API_URL}/identify_staff_from_image`, formData, { 
+            headers: formData.getHeaders(), timeout: 5000 
           });
-          if (faceRes.data && !faceRes.data.error) {
-             faceResults.push({ file: file.originalname, ...faceRes.data });
-          }
-          stream.destroy(); 
-        } catch (err) {}
+          if (!resp.data.error) faceResults.push({ file: img.originalname, ...resp.data });
+        } catch (e) {}
       }
     }
 
-    const parts = [];
-    let promptFinal = text || "Analiza el contenido adjunto.";
-    
-    if (projectId) promptFinal += ` [Proyecto: ${projectId}]`;
-    if (faceResults.length > 0) promptFinal += ` [Personal: ${JSON.stringify(faceResults)}]`;
+    // --- PREPARAR CEREBRO VERTEX AI ---
+    const vertex_ai = new VertexAI({ project: PROJECT_ID, location: LOCATION });
+    const model = vertex_ai.getGenerativeModel({
+      model: MODEL_ID,
+      systemInstruction: {
+        parts: [{ text: `
+          ERES SSOMA-KAIZEN (Auditor y Soporte Técnico).
+          
+          TU MISIÓN:
+          1. FILTRO DE CONTENIDO (IMPORTANTE):
+             Antes de responder, analiza el contenido del archivo adjunto o la pregunta.
+             - ¿Es sobre Recursos Humanos, Planillas, Leyes Laborales? -> PROCESAR.
+             - ¿Es sobre Seguridad (SSOMA), Construcción, Riesgos? -> PROCESAR.
+             - ¿Es sobre el uso de la plataforma Kaizen? -> PROCESAR.
+             - ¿Es otro tema (Cocina, Deportes, Poesía, Tareas escolares)? -> RECHAZAR.
+             
+             SI EL CONTENIDO NO ES PERTINENTE, RESPONDE ÚNICAMENTE:
+             "⚠️ CONTENIDO NO VÁLIDO: El archivo o consulta no está relacionado con la gestión de RH, Seguridad Ocupacional o la plataforma Kaizen."
 
-    parts.push({ text: promptFinal });
+          2. AUDITORÍA DOCUMENTAL:
+             Si el archivo es válido (ej. una planilla excel, un reporte docx), búscalo errores, inconsistencias o cálculos mal hechos según el Manual.
+
+          [CONTEXTO APP]
+          ${MANUAL_KAIZEN}
+          
+          [REGLAMENTO SSOMA]
+          ${REGLAMENTO_SSOMA}
+        `}]
+      },
+      generationConfig: { maxOutputTokens: 2048, temperature: 0.2 },
+      safetySettings: [
+        { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH }
+      ]
+    });
+
+    // Construir Prompt Multimodal
+    const parts = [];
+    const promptText = text || "Analiza los archivos adjuntos bajo los criterios de auditoría.";
+    parts.push({ text: `Consulta: ${promptText}\nDatos Faciales: ${JSON.stringify(faceResults)}` });
 
     for (const file of validFiles) {
-      const fileBuffer = fs.readFileSync(file.path);
-      const isText = file.mimetype.match(/text|json|csv|xml/);
-      const isPDF = file.mimetype === 'application/pdf' || file.originalname.toLowerCase().endsWith('.pdf');
-
+      const buffer = fs.readFileSync(file.path);
+      const isText = file.mimetype.match(/text|json|csv/);
+      
       if (isText) {
-        parts.push({ text: `\n[ARCHIVO: ${file.originalname}]\n${fileBuffer.toString('utf-8')}\n[FIN ARCHIVO]\n` });
+        parts.push({ text: `\n--- ARCHIVO (${file.originalname}) ---\n${buffer.toString('utf-8')}\n--- FIN ---\n` });
       } else {
-        const mimeToSend = isPDF ? 'application/pdf' : file.mimetype;
+        // Para PDF, DOCX, XLSX, Imágenes -> Enviamos como Inline Data
         parts.push({
           inlineData: {
-            mimeType: mimeToSend,
-            data: fileBuffer.toString('base64')
+            mimeType: file.mimetype,
+            data: buffer.toString('base64')
           }
         });
       }
     }
 
-    const result = await generativeModel.generateContent({
+    console.log(`🤖 Enviando a Gemini (${validFiles.length} archivos)...`);
+    
+    const result = await model.generateContent({
       contents: [{ role: 'user', parts: parts }]
     });
 
     const response = await result.response;
-    const reply = response.candidates?.[0]?.content?.parts?.[0]?.text || "Sin respuesta.";
+    const reply = response.candidates?.[0]?.content?.parts?.[0]?.text || "Sin respuesta de la IA.";
 
-    res.json({
-      success: true,
-      reply: reply,
-      message: reply,
-      faceResults,
-      tokensUsed: response.usageMetadata?.totalTokenCount || 0
-    });
+    res.json({ success: true, reply, faceResults });
 
   } catch (error) {
-    console.error('Error:', error.message);
-    res.status(500).json({
-      success: false,
-      error: 'server_error',
-      message: error.message
-    });
+    console.error('🔥 Error:', error.message);
+    res.status(500).json({ success: false, error: 'server_error', message: error.message });
   } finally {
     setTimeout(() => {
-      filesToDelete.forEach(p => {
-        try { if (fs.existsSync(p)) fs.unlinkSync(p); } catch (e) {}
-      });
-    }, 1000); 
+      filesToDelete.forEach(p => safeDelete(p));
+    }, 1000);
   }
 }
