@@ -35,7 +35,7 @@ SEGURIDAD (CRITERIO TÉCNICO):
 
 const PROJECT_ID = process.env.PROJECT_ID || 'causal-binder-459316-v6';
 const LOCATION = process.env.LOCATION || 'us-central1';
-const MODEL_ID = 'gemini-1.5-flash';
+const MODEL_ID = 'gemini-1.5-flash-001';
 const FACE_API_URL = process.env.FACE_API_URL;
 const UPLOAD_DIR = path.join(process.cwd(), 'uploads');
 
