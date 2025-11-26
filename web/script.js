@@ -1,7 +1,9 @@
 // --- CONFIGURACIÓN ---
-// IMPORTANTE: Si estás en local, asegúrate que el backend corre en el puerto 3000.
-// Si usas Render u otro host, cambia esta URL por la de producción.
-const API_URL = 'https://ssoma-kaizen-api.onrender.com'; 
+// Detectar si estamos en local o producción automáticamente
+const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+// Si es local, usa localhost:3000. Si es producción (Render), usa la URL relativa o la de Render.
+const API_URL = isLocal ? 'http://localhost:3000/chat/query' : 'https://ssoma-kaizen-api.onrender.com/chat/query'; 
+
 const LS_KEY = 'KAIZEN_SESSIONS_V4';
 
 // --- ESTADO DE LA APLICACIÓN ---
@@ -191,6 +193,7 @@ const app = {
             files.forEach(f => formData.append('files', f));
 
             // 3. Llamada API
+            console.log(`Enviando a: ${API_URL}`); // Log para depuración
             const res = await fetch(API_URL, {
                 method: 'POST',
                 body: formData
@@ -222,7 +225,7 @@ const app = {
             console.error(error);
             this.renderMessage({ 
                 role: 'system', 
-                content: `❌ <strong>Error de conexión:</strong> No se pudo contactar con la API en <code>${API_URL}</code>.<br>Verifica que el servidor esté corriendo con <code>npm start</code> en la carpeta <code>api</code>.` 
+                content: `❌ <strong>Error de conexión:</strong> No se pudo contactar con la API en <code>${API_URL}</code>.<br>Detalles: ${error.message}` 
             });
         } finally {
             dom.sendBtn.disabled = false;
@@ -252,7 +255,7 @@ const app = {
 
         const avatarSrc = msg.role === 'ai' ? './assets/Kaizen B.png' : './assets/Icon App.png';
         
-        // Si es 'ai', no mostramos el nombre en la meta (redundante con el avatar), o muy sutil
+        // Si es 'ai', no mostramos el nombre en la meta
         // Si es 'user', nombre "TÚ" pequeño y gris
         const label = msg.role === 'ai' ? 'KAIZEN AI' : 'TÚ';
 

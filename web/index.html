@@ -81,20 +81,22 @@
 
         <!-- Input Area (Composer) -->
         <div class="composer">
-          <div class="bar">
-            <label class="btn-attach" title="Adjuntar archivo">
-              <input id="fileInput" type="file" multiple />
-              <i class="fa-solid fa-paperclip"></i>
-            </label>
-            <div class="field">
-              <textarea id="input" rows="1" placeholder="Escribe tu mensaje..." autocomplete="off"></textarea>
+          <div class="bar-container"> <!-- Nuevo contenedor para centrar y limitar ancho -->
+            <div class="bar">
+              <label class="btn-attach" title="Adjuntar archivo">
+                <input id="fileInput" type="file" multiple />
+                <i class="fa-solid fa-paperclip"></i>
+              </label>
+              <div class="field">
+                <textarea id="input" rows="1" placeholder="Escribe tu mensaje..." autocomplete="off"></textarea>
+              </div>
+              <button id="sendBtn" class="btn-send" title="Enviar">
+                  <i class="fa-solid fa-paper-plane"></i>
+              </button>
             </div>
-            <button id="sendBtn" class="btn-send" title="Enviar">
-                <i class="fa-solid fa-paper-plane"></i>
-            </button>
-          </div>
-          <div class="hint">
-            <span class="note"><strong>Kaizen AI</strong> puede cometer errores. Verifica la información importante.</span>
+            <div class="hint">
+              <span class="note"><strong>Kaizen AI</strong> puede cometer errores. Verifica la información importante.</span>
+            </div>
           </div>
         </div>
       </div>
