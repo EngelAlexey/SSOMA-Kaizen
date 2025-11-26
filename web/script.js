@@ -1,7 +1,7 @@
 // --- CONFIGURACIÓN ---
 // IMPORTANTE: Si estás en local, asegúrate que el backend corre en el puerto 3000.
 // Si usas Render u otro host, cambia esta URL por la de producción.
-const API_URL = 'http://localhost:3000/chat/query'; 
+const API_URL = 'https://ssoma-kaizen-api.onrender.com'; 
 const LS_KEY = 'KAIZEN_SESSIONS_V4';
 
 // --- ESTADO DE LA APLICACIÓN ---
