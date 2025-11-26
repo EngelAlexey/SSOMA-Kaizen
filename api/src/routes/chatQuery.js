@@ -110,7 +110,7 @@ export async function handleChatQuery(req, res) {
     }
 
     const vertex_ai = new VertexAI({ project: PROJECT_ID, location: LOCATION });
-    const model = vertex_ai.preview.getGenerativeModel({
+    const model = vertex_ai.getGenerativeModel({
       model: MODEL_ID,
       systemInstruction: {
         parts: [{ text: `
