@@ -3,640 +3,108 @@
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>SSOMA - Kaizen AI</title>
+  <title>Kaizen GPT</title>
   <link rel="shortcut icon" href="./assets/Icon App.png" type="image/x-icon">
   
-  <!-- Fuentes y Estilos -->
+  <!-- Fuentes -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
-  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- Iconos y Markdown -->
   <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 
-  <!-- Configuración Tailwind Personalizada -->
-  <script>
-    tailwind.config = {
-      darkMode: 'class',
-      theme: {
-        extend: {
-          fontFamily: {
-            sans: ['Inter', 'sans-serif'],
-          },
-          colors: {
-            kaizen: {
-              red: '#E10600',      // Rojo Kaizen Principal
-              dark: '#0B0B0B',     // Fondo Principal
-              panel: '#111214',    // Paneles
-              border: '#23252A',   // Bordes sutiles
-              text: '#E6E8EA',     // Texto principal
-              muted: '#9AA1A9',    // Texto secundario
-              hover: '#1A1C20'     // Hover states
-            }
-          },
-          animation: {
-            'fade-in': 'fadeIn 0.3s ease-out',
-            'slide-up': 'slideUp 0.3s ease-out',
-          },
-          keyframes: {
-            fadeIn: {
-              '0%': { opacity: '0' },
-              '100%': { opacity: '1' },
-            },
-            slideUp: {
-              '0%': { transform: 'translateY(10px)', opacity: '0' },
-              '100%': { transform: 'translateY(0)', opacity: '1' },
-            }
-          }
-        }
-      }
-    }
-  </script>
-
-  <style>
-    /* Estilos Base y Scrollbar */
-    body { 
-      background-color: #0B0B0B; 
-      color: #E6E8EA;
-      background-image: radial-gradient(circle at 50% 0%, #1a0505 0%, #0b0b0b 40%);
-    }
-
-    ::-webkit-scrollbar { width: 6px; height: 6px; }
-    ::-webkit-scrollbar-track { background: transparent; }
-    ::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
-    ::-webkit-scrollbar-thumb:hover { background: #E10600; }
-
-    /* Estilos Markdown para Respuestas IA */
-    .markdown-body { font-size: 0.95rem; line-height: 1.6; }
-    .markdown-body h1, .markdown-body h2, .markdown-body h3 { color: #fff; font-weight: 600; margin-top: 1em; margin-bottom: 0.5em; }
-    .markdown-body p { margin-bottom: 0.8em; }
-    .markdown-body ul { list-style-type: disc; padding-left: 1.5em; margin-bottom: 0.8em; }
-    .markdown-body ol { list-style-type: decimal; padding-left: 1.5em; margin-bottom: 0.8em; }
-    .markdown-body strong { color: #E10600; font-weight: 600; }
-    .markdown-body code { background: #1F2937; padding: 2px 6px; border-radius: 4px; font-family: monospace; font-size: 0.85em; color: #FF8A80; }
-    .markdown-body pre { background: #111214; padding: 12px; border-radius: 8px; overflow-x: auto; border: 1px solid #23252A; margin-bottom: 1em; }
-    .markdown-body blockquote { border-left: 3px solid #E10600; padding-left: 1em; color: #9AA1A9; font-style: italic; }
-    
-    /* Animación de carga (Typing dots) */
-    .typing-dot {
-      width: 6px; height: 6px; background-color: #9AA1A9; border-radius: 50%;
-      animation: typing 1.4s infinite ease-in-out both;
-    }
-    .typing-dot:nth-child(1) { animation-delay: -0.32s; }
-    .typing-dot:nth-child(2) { animation-delay: -0.16s; }
-    @keyframes typing { 0%, 80%, 100% { transform: scale(0); } 40% { transform: scale(1); } }
-
-    /* Efecto Glassmorphism en inputs */
-    .glass-panel {
-      background: rgba(17, 18, 20, 0.7);
-      backdrop-filter: blur(10px);
-      -webkit-backdrop-filter: blur(10px);
-      border: 1px solid rgba(255, 255, 255, 0.05);
-    }
-  </style>
+  <!-- Estilos -->
+  <link rel="stylesheet" href="styles.css">
 </head>
+<body>
+  <!-- Fondo con Overlay -->
+  <div class="background-layer"></div>
+  <div class="veil"></div>
 
-<body class="h-screen flex overflow-hidden font-sans antialiased selection:bg-kaizen-red selection:text-white">
-
-  <!-- SIDEBAR (Historial) -->
-  <aside id="sidebar" class="w-72 bg-kaizen-panel border-r border-kaizen-border flex flex-col h-full transition-transform duration-300 absolute md:relative z-30 -translate-x-full md:translate-x-0 shadow-2xl md:shadow-none">
-    
-    <!-- Logo Area -->
-    <div class="p-5 border-b border-kaizen-border flex items-center gap-3 select-none">
-      <img src="./assets/Icon App.png" alt="Kaizen Logo" class="w-8 h-8 object-contain drop-shadow-md">
-      <div>
-        <h1 class="font-bold text-lg tracking-wide text-white">SSOMA <span class="text-kaizen-red">AI</span></h1>
-        <p class="text-[10px] text-kaizen-muted uppercase tracking-wider">Asistente Virtual</p>
-      </div>
-    </div>
-
-    <!-- Botón Nuevo Chat -->
-    <div class="p-4">
-      <button onclick="createNewChat()" class="w-full group bg-transparent hover:bg-kaizen-hover border border-kaizen-border hover:border-kaizen-red text-kaizen-text py-2.5 px-4 rounded-xl flex items-center justify-center gap-2 transition-all duration-200 shadow-sm">
-        <i class="fa-solid fa-plus text-kaizen-red group-hover:scale-110 transition-transform"></i>
-        <span class="font-medium text-sm">Nueva Consulta</span>
-      </button>
-    </div>
-
-    <!-- Lista de Historial -->
-    <div class="flex-1 overflow-y-auto px-3 pb-4 space-y-1" id="chat-history-list">
-      <!-- Los chats se inyectan aquí -->
-    </div>
-
-    <!-- User Info / Footer -->
-    <div class="p-4 border-t border-kaizen-border bg-black/20">
-      <div class="flex items-center gap-3">
-        <div class="w-8 h-8 rounded-full bg-gradient-to-tr from-gray-700 to-gray-600 flex items-center justify-center text-xs font-bold text-white shadow-inner">
-          US
-        </div>
-        <div class="flex-1 min-w-0">
-          <p class="text-sm font-medium text-white truncate">Usuario Kaizen</p>
-          <p class="text-xs text-kaizen-muted truncate">Versión 2.0.1</p>
+  <div class="layout">
+    <!-- Sidebar -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sb-head">
+        <img src="./assets/Kaizen B.png" alt="k" class="logo-icon">
+        <div>
+          <div class="sb-title">Historial</div>
+          <div class="note">Consultas recientes</div>
         </div>
       </div>
-    </div>
-  </aside>
-
-  <!-- MAIN CONTENT -->
-  <main class="flex-1 flex flex-col h-full relative bg-gradient-to-b from-kaizen-dark to-[#0f0f0f]">
-    
-    <!-- Mobile Header -->
-    <header class="md:hidden flex items-center justify-between p-4 border-b border-kaizen-border bg-kaizen-panel/90 backdrop-blur-md z-20">
-      <button onclick="toggleSidebar()" class="text-white p-2 hover:bg-white/10 rounded-lg transition-colors">
-        <i class="fa-solid fa-bars"></i>
-      </button>
-      <span class="font-semibold text-white tracking-wide">KAIZEN</span>
-      <div class="w-8"></div> <!-- Spacer -->
-    </header>
-
-    <!-- Área de Chat -->
-    <div id="messages-container" class="flex-1 overflow-y-auto p-4 md:p-8 space-y-6 scroll-smooth">
       
-      <!-- Pantalla de Bienvenida (Empty State) -->
-      <div id="welcome-screen" class="h-full flex flex-col items-center justify-center text-center opacity-0 animate-fade-in transition-opacity duration-500">
-        <div class="w-20 h-20 bg-kaizen-panel border border-kaizen-border rounded-2xl flex items-center justify-center mb-6 shadow-2xl shadow-kaizen-red/10">
-          <img src="./assets/Icon App.png" class="w-10 h-10 opacity-90">
-        </div>
-        <h2 class="text-2xl md:text-3xl font-bold text-white mb-3">Bienvenido a Kaizen AI</h2>
-        <p class="text-kaizen-muted max-w-md text-sm md:text-base leading-relaxed">
-          Tu asistente experto en SSOMA y gestión de obras.<br>
-          Puedo analizar documentos, fotos de riesgos y responder dudas del manual.
-        </p>
-        
-        <!-- Sugerencias Rápidas -->
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mt-8 w-full max-w-2xl">
-          <button onclick="quickAction('¿Cómo registro un accidente en la app?')" class="p-3 bg-kaizen-panel hover:bg-kaizen-hover border border-kaizen-border rounded-xl text-left text-sm text-kaizen-muted hover:text-white transition-all hover:border-gray-600 group">
-            <i class="fa-solid fa-book-medical text-kaizen-red mr-2 group-hover:scale-110 inline-block transition-transform"></i> ¿Cómo registro un accidente?
-          </button>
-          <button onclick="quickAction('Analiza los riesgos de esta imagen (adjuntar)')" class="p-3 bg-kaizen-panel hover:bg-kaizen-hover border border-kaizen-border rounded-xl text-left text-sm text-kaizen-muted hover:text-white transition-all hover:border-gray-600 group">
-             <i class="fa-solid fa-camera text-kaizen-red mr-2 group-hover:scale-110 inline-block transition-transform"></i> Analizar foto de obra
-          </button>
-        </div>
-      </div>
-
-      <!-- Los mensajes se inyectan aquí -->
-      <div id="messages-list" class="max-w-3xl mx-auto w-full space-y-6 pb-4"></div>
+      <div id="convList" class="conv-list"></div>
       
-      <!-- Loader flotante (invisible por defecto) -->
-      <div id="global-loader" class="hidden max-w-3xl mx-auto w-full">
-         <div class="flex gap-4">
-            <div class="w-8 h-8 rounded-full bg-kaizen-panel border border-kaizen-border flex items-center justify-center shrink-0">
-               <img src="./assets/Icon App.png" class="w-5 h-5">
-            </div>
-            <div class="flex items-center gap-1 h-8">
-               <div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div>
-            </div>
-         </div>
+      <button class="sb-btn-new" id="btnNewChat">
+        <i class="fa-solid fa-plus"></i> Nuevo Chat
+      </button>
+    </aside>
+
+    <!-- Contenido Principal -->
+    <main>
+      <!-- Header -->
+      <div class="brand">
+        <img class="logo" src="./assets/Icon App.png" alt="Kaizen">
+        <div>
+          <h1>Kaizen <span class="dot">●</span></h1>
+          <div class="sub">Resource Management · Seguridad & RRHH</div>
+        </div>
+        <button class="mobile-menu-btn" id="btnMobileMenu">
+            <i class="fa-solid fa-bars"></i>
+        </button>
       </div>
 
-    </div>
-
-    <!-- Área de Input (Composer) -->
-    <div class="p-4 md:p-6 pb-6">
-      <div class="max-w-3xl mx-auto relative z-10">
+      <!-- Panel de Chat -->
+      <div class="panel">
         
-        <!-- Preview de Archivos Adjuntos -->
-        <div id="file-preview-area" class="flex flex-wrap gap-2 mb-3 hidden animate-slide-up pl-1">
-          <!-- Chips de archivos se generan aquí -->
-        </div>
-
-        <!-- Barra de Entrada -->
-        <form id="chat-form" onsubmit="handleFormSubmit(event)" 
-              class="glass-panel rounded-2xl flex items-end p-2 shadow-2xl shadow-black/50 transition-all focus-within:border-kaizen-red/50 focus-within:ring-1 focus-within:ring-kaizen-red/20">
-          
-          <!-- Botón Adjuntar -->
-          <button type="button" onclick="document.getElementById('file-input').click()" 
-                  class="p-3 text-kaizen-muted hover:text-white hover:bg-white/10 rounded-xl transition-colors shrink-0"
-                  title="Adjuntar archivo o imagen">
-            <i class="fa-solid fa-paperclip text-lg"></i>
-          </button>
-          <input type="file" id="file-input" multiple class="hidden" onchange="handleFileSelect(event)">
-
-          <!-- Input de Texto -->
-          <textarea id="user-input" rows="1" 
-                    class="w-full bg-transparent text-white placeholder-gray-500 text-sm md:text-base px-3 py-3.5 focus:outline-none resize-none max-h-32 overflow-y-auto"
-                    placeholder="Envía un mensaje a Kaizen AI..." 
-                    oninput="autoResize(this)" 
-                    onkeydown="handleEnter(event)"></textarea>
-
-          <!-- Botón Enviar -->
-          <button type="submit" id="send-btn" 
-                  class="p-3 bg-kaizen-red text-white rounded-xl hover:bg-red-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-red-900/20 shrink-0">
-            <i class="fa-solid fa-arrow-up"></i>
-          </button>
-        </form>
-        
-        <div class="text-center mt-3">
-           <p class="text-[11px] text-gray-600">Kaizen AI puede cometer errores. Revisa la información crítica.</p>
-        </div>
-      </div>
-    </div>
-
-    <!-- Overlay Móvil -->
-    <div id="overlay" onclick="toggleSidebar()" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-20 hidden md:hidden transition-opacity"></div>
-
-    <!-- Modal Renombrar -->
-    <div id="rename-modal" class="fixed inset-0 flex items-center justify-center bg-black/80 backdrop-blur-sm z-50 hidden animate-fade-in">
-        <div class="bg-kaizen-panel border border-kaizen-border p-6 rounded-2xl w-80 shadow-2xl">
-            <h3 class="text-lg font-semibold text-white mb-4">Renombrar Chat</h3>
-            <input type="text" id="rename-input" class="w-full bg-black/30 border border-kaizen-border text-white p-3 rounded-xl mb-5 focus:border-kaizen-red outline-none text-sm" autocomplete="off">
-            <div class="flex justify-end gap-3">
-                <button onclick="closeRenameModal()" class="px-4 py-2 text-sm text-kaizen-muted hover:text-white transition-colors">Cancelar</button>
-                <button onclick="confirmRename()" class="px-4 py-2 text-sm bg-kaizen-red text-white rounded-lg hover:bg-red-700 shadow-lg shadow-red-900/20 transition-all">Guardar</button>
+        <!-- Mensajes -->
+        <div id="messages" class="messages">
+            <!-- Estado Vacío (Bienvenida) -->
+            <div id="empty-state" class="empty-state">
+                <div class="empty-icon">
+                    <img src="./assets/Icon App.png" alt="Logo">
+                </div>
+                <h2>SSOMA - Kaizen AI</h2>
+                <p>Asistente inteligente para gestión de obras, seguridad y RRHH.<br>Realiza una consulta o sube un documento para auditar.</p>
             </div>
         </div>
-    </div>
 
-  </main>
+        <!-- Preview de Archivos -->
+        <div class="attach-float" id="attachFloat">
+            <div class="attach-icon"><i class="fa-solid fa-paperclip"></i></div>
+            <div class="attach-info">
+                <div class="attach-name" id="afName">archivo.pdf</div>
+                <div class="attach-size" id="afSize">0 KB</div>
+            </div>
+            <button class="attach-close" id="afClose"><i class="fa-solid fa-xmark"></i></button>
+        </div>
 
-  <script>
-    // --- CONFIGURACIÓN ---
-    const API_URL = 'http://localhost:3000/chat/query'; 
-    
-    // ESTADO GLOBAL
-    let chats = JSON.parse(localStorage.getItem('kaizen_chats')) || [];
-    let currentChatId = null;
-    let selectedFiles = [];
+        <!-- Input Area (Composer) -->
+        <div class="composer">
+          <div class="bar">
+            <label class="btn-attach" title="Adjuntar archivo">
+              <input id="fileInput" type="file" multiple />
+              <i class="fa-solid fa-paperclip"></i>
+            </label>
+            <div class="field">
+              <textarea id="input" rows="1" placeholder="Escribe tu mensaje..." autocomplete="off"></textarea>
+            </div>
+            <button id="sendBtn" class="btn-send" title="Enviar">
+                <i class="fa-solid fa-paper-plane"></i>
+            </button>
+          </div>
+          <div class="hint">
+            <span class="note"><strong>Kaizen AI</strong> puede cometer errores. Verifica la información importante.</span>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
 
-    // ELEMENTOS DOM
-    const dom = {
-        input: document.getElementById('user-input'),
-        sendBtn: document.getElementById('send-btn'),
-        messagesList: document.getElementById('messages-list'),
-        messagesContainer: document.getElementById('messages-container'),
-        welcomeScreen: document.getElementById('welcome-screen'),
-        convList: document.getElementById('chat-history-list'),
-        fileInput: document.getElementById('file-input'),
-        filePreviewArea: document.getElementById('file-preview-area'),
-        loader: document.getElementById('global-loader'),
-        renameModal: document.getElementById('rename-modal'),
-        renameInput: document.getElementById('rename-input')
-    };
+  <!-- Overlay Móvil -->
+  <div id="overlay" class="overlay"></div>
 
-    // --- INICIALIZACIÓN ---
-    document.addEventListener('DOMContentLoaded', () => {
-        if (chats.length > 0) {
-            loadChat(chats[0].id);
-        } else {
-            createNewChat();
-        }
-        renderSidebar();
-    });
-
-    // --- LÓGICA DE CHATS ---
-
-    function createNewChat() {
-        const newId = Date.now().toString();
-        const newChat = {
-            id: newId,
-            title: 'Nueva consulta',
-            messages: [],
-            timestamp: Date.now()
-        };
-        chats.unshift(newChat);
-        saveChats();
-        loadChat(newId);
-        if(window.innerWidth < 768) toggleSidebar(false); // Cerrar sidebar en móvil
-        dom.input.focus();
-    }
-
-    function loadChat(id) {
-        currentChatId = id;
-        const chat = chats.find(c => c.id === id);
-        if (!chat) return;
-
-        // Limpiar UI
-        dom.messagesList.innerHTML = '';
-        
-        // Estado de pantalla
-        if (chat.messages.length === 0) {
-            dom.welcomeScreen.classList.remove('hidden');
-            dom.welcomeScreen.classList.add('flex');
-        } else {
-            dom.welcomeScreen.classList.add('hidden');
-            dom.welcomeScreen.classList.remove('flex');
-            // Renderizar mensajes
-            chat.messages.forEach(msg => {
-                appendMessageToUI(msg.role, msg.content, msg.files);
-            });
-        }
-
-        renderSidebar();
-        setTimeout(scrollToBottom, 50);
-    }
-
-    function saveChats() {
-        localStorage.setItem('kaizen_chats', JSON.stringify(chats));
-        renderSidebar();
-    }
-
-    function renderSidebar() {
-        dom.convList.innerHTML = '';
-        
-        // Agrupar por fechas podría ser una mejora futura
-        chats.forEach(chat => {
-            const isActive = chat.id === currentChatId;
-            const item = document.createElement('div');
-            
-            // Estilos dinámicos
-            const baseClasses = "group flex items-center justify-between p-3 rounded-xl cursor-pointer text-sm mb-1 transition-all duration-200 border border-transparent";
-            const activeClasses = "bg-[#1A1C20] border-kaizen-border text-white shadow-sm border-l-4 border-l-kaizen-red";
-            const inactiveClasses = "text-gray-400 hover:bg-[#1A1C20] hover:text-gray-200";
-
-            item.className = `${baseClasses} ${isActive ? activeClasses : inactiveClasses}`;
-            item.onclick = () => loadChat(chat.id);
-
-            item.innerHTML = `
-                <div class="flex items-center gap-3 overflow-hidden">
-                    <i class="fa-regular fa-message ${isActive ? 'text-kaizen-red' : 'text-gray-500'} text-xs"></i>
-                    <span class="truncate font-medium">${chat.title}</span>
-                </div>
-                <div class="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity items-center">
-                    <button onclick="openRenameModal('${chat.id}', event)" class="text-gray-500 hover:text-white transition-colors" title="Renombrar">
-                        <i class="fa-solid fa-pen text-[10px]"></i>
-                    </button>
-                    <button onclick="deleteChat('${chat.id}', event)" class="text-gray-500 hover:text-kaizen-red transition-colors" title="Eliminar">
-                        <i class="fa-solid fa-trash text-[10px]"></i>
-                    </button>
-                </div>
-            `;
-            dom.convList.appendChild(item);
-        });
-    }
-
-    function deleteChat(id, event) {
-        event.stopPropagation();
-        if(!confirm('¿Estás seguro de eliminar esta conversación? Esta acción no se puede deshacer.')) return;
-        
-        chats = chats.filter(c => c.id !== id);
-        saveChats();
-        
-        if (chats.length === 0) createNewChat();
-        else if (currentChatId === id) loadChat(chats[0].id);
-        else renderSidebar();
-    }
-
-    // --- RENOMBRAR CHAT ---
-    let chatToRenameId = null;
-    
-    function openRenameModal(id, e) {
-        e.stopPropagation();
-        chatToRenameId = id;
-        const chat = chats.find(c => c.id === id);
-        dom.renameInput.value = chat.title;
-        dom.renameModal.classList.remove('hidden');
-        dom.renameInput.focus();
-    }
-    
-    function closeRenameModal() {
-        dom.renameModal.classList.add('hidden');
-        chatToRenameId = null;
-    }
-
-    function confirmRename() {
-        const newTitle = dom.renameInput.value.trim();
-        if (newTitle && chatToRenameId) {
-            const chat = chats.find(c => c.id === chatToRenameId);
-            chat.title = newTitle;
-            saveChats();
-        }
-        closeRenameModal();
-    }
-
-    // Permitir enter en modal
-    dom.renameInput.addEventListener('keydown', (e) => {
-        if(e.key === 'Enter') confirmRename();
-        if(e.key === 'Escape') closeRenameModal();
-    });
-
-    // --- LÓGICA DE MENSAJERÍA ---
-
-    async function handleFormSubmit(e) {
-        e.preventDefault();
-        sendMessage();
-    }
-
-    function quickAction(text) {
-        dom.input.value = text;
-        dom.input.focus();
-        autoResize(dom.input);
-    }
-
-    async function sendMessage() {
-        const text = dom.input.value.trim();
-        const files = [...selectedFiles]; // Copia
-
-        if (!text && files.length === 0) return;
-
-        // 1. UI Optimista (Usuario)
-        dom.welcomeScreen.classList.add('hidden');
-        dom.welcomeScreen.classList.remove('flex');
-        
-        appendMessageToUI('user', text, files);
-        
-        // Guardar historial usuario
-        const fileNames = files.map(f => ({ name: f.name, type: f.type })); // Guardamos metadatos simples
-        saveMessageToHistory('user', text, fileNames);
-
-        // Limpiar UI Input
-        dom.input.value = '';
-        dom.input.style.height = 'auto';
-        clearFiles();
-
-        // Mostrar Loader
-        dom.loader.classList.remove('hidden');
-        dom.sendBtn.disabled = true;
-        scrollToBottom();
-
-        try {
-            // 2. Preparar Envío
-            const formData = new FormData();
-            formData.append('text', text);
-            formData.append('session_id', currentChatId); // Opcional si el backend lo usa
-            files.forEach(f => formData.append('files', f));
-            
-            // 3. Fetch API
-            const res = await fetch(API_URL, { method: 'POST', body: formData });
-            const data = await res.json();
-
-            dom.loader.classList.add('hidden');
-            dom.sendBtn.disabled = false;
-
-            if (data.success) {
-                appendMessageToUI('ai', data.reply);
-                saveMessageToHistory('ai', data.reply, []);
-                
-                // Auto-título inteligente
-                const currentChat = chats.find(c => c.id === currentChatId);
-                if (currentChat.messages.length <= 2 && text) {
-                    // Usar primeros 30 chars como título
-                    currentChat.title = text.length > 30 ? text.substring(0, 30) + '...' : text;
-                    saveChats();
-                }
-            } else {
-                appendMessageToUI('system', `Error: ${data.message || 'Error desconocido del servidor'}`);
-            }
-
-        } catch (error) {
-            dom.loader.classList.add('hidden');
-            dom.sendBtn.disabled = false;
-            appendMessageToUI('system', 'Error de conexión: No se pudo contactar con la API. Verifica que el servidor esté corriendo.');
-            console.error(error);
-        }
-    }
-
-    function appendMessageToUI(role, text, files = []) {
-        const div = document.createElement('div');
-        const isUser = role === 'user';
-        const isSystem = role === 'system';
-        
-        div.className = `flex w-full animate-fade-in ${isUser ? 'justify-end' : 'justify-start'}`;
-        
-        // Icono
-        const avatar = isUser 
-            ? `` 
-            : `<div class="w-8 h-8 rounded-lg bg-kaizen-panel border border-kaizen-border flex items-center justify-center shrink-0 mr-3 mt-1 shadow-sm">
-                 <img src="./assets/Icon App.png" class="w-5 h-5 object-contain">
-               </div>`;
-               
-        // Renderizar Archivos en el mensaje
-        let filesHtml = '';
-        if (files && files.length > 0) {
-            filesHtml = `<div class="flex flex-wrap gap-2 mb-3">`;
-            files.forEach(f => {
-                const name = f.name || f; // Manejar objeto u string
-                const isImg = f.type?.startsWith('image') || false;
-                const iconClass = isImg ? 'fa-image' : 'fa-file-lines';
-                
-                filesHtml += `
-                    <div class="bg-black/20 border border-white/10 rounded-lg px-3 py-2 flex items-center gap-2 text-xs text-gray-300 max-w-xs">
-                        <i class="fa-solid ${iconClass} text-kaizen-red"></i>
-                        <span class="truncate">${name}</span>
-                    </div>
-                `;
-            });
-            filesHtml += `</div>`;
-        }
-
-        // Renderizar Contenido
-        let contentHtml = '';
-        if (isSystem) {
-            contentHtml = `<div class="bg-red-900/20 border border-red-900/50 text-red-200 text-sm px-4 py-3 rounded-xl flex items-center gap-2">
-                            <i class="fa-solid fa-triangle-exclamation"></i> ${text}
-                           </div>`;
-        } else {
-            const parsedText = isUser ? text.replace(/\n/g, '<br>') : marked.parse(text);
-            const bubbleClass = isUser 
-                ? 'bg-[#2A2A2A] text-white rounded-2xl rounded-tr-sm border border-gray-700' 
-                : 'text-gray-100 w-full'; // AI sin fondo, estilo chatgpt moderno
-            
-            contentHtml = `
-                <div class="max-w-[85%] md:max-w-2xl ${bubbleClass} px-4 py-3 shadow-sm">
-                    ${filesHtml}
-                    <div class="markdown-body">${parsedText}</div>
-                </div>
-            `;
-        }
-
-        div.innerHTML = `${!isUser && !isSystem ? avatar : ''}${contentHtml}`;
-        dom.messagesList.appendChild(div);
-    }
-
-    function saveMessageToHistory(role, content, files) {
-        const chat = chats.find(c => c.id === currentChatId);
-        if (chat) {
-            chat.messages.push({ role, content, files, timestamp: Date.now() });
-            saveChats();
-        }
-    }
-
-    // --- MANEJO DE ARCHIVOS ---
-
-    dom.fileInput.addEventListener('change', (e) => {
-        if (e.target.files.length > 0) {
-            // Acumular archivos en lugar de reemplazar
-            selectedFiles = [...selectedFiles, ...Array.from(e.target.files)];
-            renderFilePreview();
-            e.target.value = ''; // Reset para permitir subir el mismo archivo
-        }
-    });
-
-    function renderFilePreview() {
-        dom.filePreviewArea.innerHTML = '';
-        
-        if (selectedFiles.length > 0) {
-            dom.filePreviewArea.classList.remove('hidden');
-            
-            selectedFiles.forEach((f, i) => {
-                const div = document.createElement('div');
-                div.className = 'group bg-kaizen-panel border border-kaizen-border pl-3 pr-1 py-1.5 rounded-lg flex items-center gap-2 text-xs text-gray-300 shadow-lg animate-fade-in';
-                
-                let icon = 'fa-file';
-                if (f.type.includes('image')) icon = 'fa-image';
-                if (f.type.includes('pdf')) icon = 'fa-file-pdf';
-                if (f.type.includes('sheet') || f.type.includes('csv')) icon = 'fa-file-excel';
-
-                div.innerHTML = `
-                    <i class="fa-solid ${icon} text-kaizen-red"></i>
-                    <span class="max-w-[120px] truncate">${f.name}</span>
-                    <button onclick="removeFile(${i})" class="p-1 hover:bg-white/10 rounded-md text-gray-500 hover:text-white transition-colors">
-                        <i class="fa-solid fa-xmark"></i>
-                    </button>
-                `;
-                dom.filePreviewArea.appendChild(div);
-            });
-        } else {
-            dom.filePreviewArea.classList.add('hidden');
-        }
-    }
-
-    // Función global para que el onclick del HTML funcione
-    window.removeFile = function(index) {
-        selectedFiles.splice(index, 1);
-        renderFilePreview();
-    }
-
-    function clearFiles() {
-        selectedFiles = [];
-        renderFilePreview();
-    }
-
-    // --- UTILIDADES UI ---
-
-    function scrollToBottom() {
-        dom.messagesContainer.scrollTop = dom.messagesContainer.scrollHeight;
-    }
-
-    function autoResize(el) {
-        el.style.height = 'auto';
-        el.style.height = el.scrollHeight + 'px';
-    }
-
-    function handleEnter(e) {
-        if (e.key === 'Enter' && !e.shiftKey) {
-            e.preventDefault();
-            sendMessage();
-        }
-    }
-
-    function toggleSidebar(forceState) {
-        const sb = document.getElementById('sidebar');
-        const ov = document.getElementById('overlay');
-        
-        const isClosed = sb.classList.contains('-translate-x-full');
-        const shouldOpen = forceState !== undefined ? forceState : isClosed;
-
-        if (shouldOpen) {
-            sb.classList.remove('-translate-x-full');
-            ov.classList.remove('hidden');
-        } else {
-            sb.classList.add('-translate-x-full');
-            ov.classList.add('hidden');
-        }
-    }
-
-    // Setup inicial para markdown seguro (opcional)
-    marked.setOptions({ breaks: true, gfm: true });
-
-  </script>
+  <!-- Lógica -->
+  <script src="script.js"></script>
 </body>
 </html>
