@@ -1,4 +1,3 @@
-// --- CONFIGURACIÓN ---
 const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
 const API_URL = isLocal ? 'http://127.0.0.1:3000/chat/query' : 'https://ssoma-kaizen-api.onrender.com/chat/query'; 
 const LS_KEY = 'KAIZEN_SESSIONS_V6';
@@ -11,7 +10,10 @@ const dom = {
     messages: document.getElementById('messages'),
     convList: document.getElementById('convList'),
     fileInput: document.getElementById('fileInput'),
-    previewArea: document.getElementById('file-preview-area'), // Nuevo contenedor
+    attachFloat: document.getElementById('attachFloat'),
+    afName: document.getElementById('afName'),
+    afSize: document.getElementById('afSize'),
+    afClose: document.getElementById('afClose'),
     emptyState: document.getElementById('empty-state'),
     sidebar: document.getElementById('sidebar'),
     overlay: document.getElementById('overlay'),
@@ -29,58 +31,56 @@ const app = {
         }
         this.renderSidebar();
         this.bindEvents();
+        this.renderFilePreview(); 
     },
 
     bindEvents() {
-        dom.sendBtn.addEventListener('click', () => this.sendMessage());
-        dom.input.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); this.sendMessage(); }
-        });
-        dom.input.addEventListener('input', function() {
-            this.style.height = 'auto'; this.style.height = (this.scrollHeight) + 'px';
-            if(this.value === '') this.style.height = 'auto';
-        });
-        dom.fileInput.addEventListener('change', (e) => {
-            if (e.target.files.length > 0) {
-                state.files = [...state.files, ...Array.from(e.target.files)];
+        if(dom.sendBtn) dom.sendBtn.addEventListener('click', () => this.sendMessage());
+        
+        if(dom.input) {
+            dom.input.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); this.sendMessage(); }
+            });
+            dom.input.addEventListener('input', function() {
+                this.style.height = 'auto'; this.style.height = (this.scrollHeight) + 'px';
+                if(this.value === '') this.style.height = 'auto';
+            });
+        }
+
+        if(dom.fileInput) {
+            dom.fileInput.addEventListener('change', (e) => {
+                if (e.target.files.length > 0) {
+                    state.files = [...state.files, ...Array.from(e.target.files)];
+                    this.renderFilePreview();
+                }
+                e.target.value = '';
+            });
+        }
+        
+        if(dom.afClose) {
+            dom.afClose.addEventListener('click', () => {
+                state.files = [];
                 this.renderFilePreview();
-            }
-            e.target.value = '';
-        });
-        dom.btnNew.addEventListener('click', () => this.createNewChat());
-        dom.btnMenu.addEventListener('click', () => this.toggleSidebar());
-        dom.overlay.addEventListener('click', () => this.toggleSidebar(false));
+            });
+        }
+        
+        if(dom.btnNew) dom.btnNew.addEventListener('click', () => this.createNewChat());
+        if(dom.btnMenu) dom.btnMenu.addEventListener('click', () => this.toggleSidebar());
+        if(dom.overlay) dom.overlay.addEventListener('click', () => this.toggleSidebar(false));
     },
 
-    // --- PREVIEW DE ARCHIVOS (MEJORADO) ---
     renderFilePreview() {
-        dom.previewArea.innerHTML = '';
+        if (!dom.attachFloat) return; 
+        
         if (state.files.length > 0) {
-            dom.previewArea.classList.remove('hidden');
-            state.files.forEach((file, index) => {
-                const div = document.createElement('div');
-                div.className = 'file-preview-card'; // Clase definida en CSS
-                
-                // Si es imagen, mostrar miniatura
-                if (file.type.startsWith('image/')) {
-                    const reader = new FileReader();
-                    reader.onload = (e) => {
-                        div.style.backgroundImage = `url(${e.target.result})`;
-                        div.classList.add('is-image');
-                    };
-                    reader.readAsDataURL(file);
-                } 
-                
-                div.innerHTML = `
-                    <div class="file-info">
-                        <span class="file-name">${file.name}</span>
-                    </div>
-                    <button onclick="app.removeFile(${index})" class="file-remove">×</button>
-                `;
-                dom.previewArea.appendChild(div);
-            });
+            dom.attachFloat.style.display = 'flex';
+            if(dom.afName) dom.afName.textContent = `${state.files.length} archivo(s)`;
+            if(dom.afSize) {
+                const totalSize = state.files.reduce((acc, f) => acc + f.size, 0);
+                dom.afSize.textContent = (totalSize / 1024).toFixed(1) + ' KB';
+            }
         } else {
-            dom.previewArea.classList.add('hidden');
+            dom.attachFloat.style.display = 'none';
         }
     },
 
@@ -89,15 +89,13 @@ const app = {
         this.renderFilePreview();
     },
 
-    // --- MENSAJERÍA ---
     async sendMessage() {
         const text = dom.input.value.trim();
         const files = [...state.files];
         if (!text && files.length === 0) return;
 
-        dom.emptyState.style.display = 'none';
+        if(dom.emptyState) dom.emptyState.style.display = 'none';
         
-        // Convertir archivos a Base64 para guardarlos en historial local (Solo imágenes pequeñas)
         const filesForHistory = await Promise.all(files.map(async f => {
             if(f.type.startsWith('image/')) {
                 return { name: f.name, type: f.type, url: await this.fileToBase64(f) };
@@ -186,9 +184,6 @@ const app = {
         this.scrollToBottom();
     },
 
-    // ... (Resto de funciones de Gestión de Datos y Sidebar iguales) ...
-    
-    // Gestión Storage, Chats y Sidebar (resumido por brevedad, es igual al anterior)
     loadFromStorage() { try { state.chats = JSON.parse(localStorage.getItem(LS_KEY)) || []; } catch(e){ state.chats=[]; } },
     saveToStorage() { localStorage.setItem(LS_KEY, JSON.stringify(state.chats)); localStorage.setItem('KAIZEN_LAST_CHAT_ID', state.currentId); this.renderSidebar(); },
     createNewChat() {
@@ -197,9 +192,15 @@ const app = {
     },
     loadChat(id) {
         state.currentId = id; const chat = state.chats.find(c => c.id === id); if (!chat) return;
-        dom.messages.innerHTML = ''; dom.messages.appendChild(dom.emptyState);
-        dom.emptyState.style.display = chat.messages.length === 0 ? 'flex' : 'none';
-        chat.messages.forEach(msg => this.appendMessageUI(msg));
+        dom.messages.innerHTML = ''; 
+        if(dom.emptyState) dom.messages.appendChild(dom.emptyState);
+        
+        if (chat.messages.length === 0) {
+            if(dom.emptyState) dom.emptyState.style.display = 'flex';
+        } else {
+            if(dom.emptyState) dom.emptyState.style.display = 'none';
+            chat.messages.forEach(msg => this.appendMessageUI(msg));
+        }
         this.renderSidebar(); localStorage.setItem('KAIZEN_LAST_CHAT_ID', id);
     },
     deleteChat(id, e) {
@@ -213,6 +214,7 @@ const app = {
         if(chat) { chat.messages.push({ role, content, files, timestamp: Date.now() }); this.saveToStorage(); }
     },
     renderSidebar() {
+        if(!dom.convList) return;
         dom.convList.innerHTML = '';
         state.chats.forEach(chat => {
             const el = document.createElement('div');
@@ -229,9 +231,11 @@ const app = {
     },
     removeLoader(id) { const el = document.getElementById(id); if(el) el.remove(); },
     scrollToBottom() { dom.messages.scrollTop = dom.messages.scrollHeight; },
-    toggleSidebar(force) { dom.sidebar.classList.toggle('open', force); dom.overlay.classList.toggle('active', force); }
+    toggleSidebar(force) { 
+        if(dom.sidebar) dom.sidebar.classList.toggle('open', force); 
+        if(dom.overlay) dom.overlay.classList.toggle('active', force); 
+    }
 };
 
-// Exponer funciones globales
 window.app = app;
 document.addEventListener('DOMContentLoaded', () => app.init());

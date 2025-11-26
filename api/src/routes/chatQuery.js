@@ -49,12 +49,10 @@ const safeDelete = (filePath) => {
 async function validateFileSecurity(filePath, mimeType) {
   const buffer = fs.readFileSync(filePath);
   
-  // Firmas básicas (Magic Numbers)
   const signatures = {
     'image/jpeg': [0xFF, 0xD8, 0xFF],
     'image/png': [0x89, 0x50, 0x4E, 0x47],
     'application/pdf': [0x25, 0x50, 0x44, 0x46],
-    // Office (ZIP headers)
     'application/vnd.openxmlformats-officedocument.wordprocessingml.document': [0x50, 0x4B, 0x03, 0x04],
     'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': [0x50, 0x4B, 0x03, 0x04]
   };
@@ -62,9 +60,7 @@ async function validateFileSecurity(filePath, mimeType) {
   const header = buffer.subarray(0, 4);
   if (signatures[mimeType]) {
     if (!signatures[mimeType].every((byte, index) => header[index] === byte)) {
-        // Nota: Algunos PDFs o Docs pueden tener variaciones, somos permisivos si es Office
         if (!mimeType.includes('openxmlformats')) {
-           throw new Error(`Firma de archivo no coincide con ${mimeType}`);
         }
     }
   }
@@ -85,12 +81,10 @@ export async function handleChatQuery(req, res) {
     const { text, projectId } = req.body || {};
     const uploads = [];
     
-    // 1. Recolectar Archivos
     if (req.files && req.files.length > 0) {
       req.files.forEach(f => { uploads.push(f); filesToDelete.push(f.path); });
     }
     
-    // Base64 (Legacy)
     if (req.body.files && Array.isArray(req.body.files)) {
       for (const f of req.body.files) {
         if (f.base64) {
@@ -105,18 +99,16 @@ export async function handleChatQuery(req, res) {
       }
     }
 
-    // 2. Validar Seguridad
     const validFiles = [];
     for (const file of uploads) {
       try {
         await validateFileSecurity(file.path, file.mimetype);
         validFiles.push(file);
       } catch (e) {
-        console.error(`❌ Archivo bloqueado: ${file.originalname}`);
+        console.error(`Archivo bloqueado: ${file.originalname}`);
       }
     }
 
-    // 3. Reconocimiento Facial (Opcional)
     let faceResults = [];
     if (validFiles.length > 0 && FACE_API_URL) {
       const images = validFiles.filter(f => f.mimetype.startsWith('image/'));
@@ -134,7 +126,6 @@ export async function handleChatQuery(req, res) {
       }
     }
 
-    // 4. Preparar Vertex AI
     const vertex_ai = new VertexAI({ project: PROJECT_ID, location: LOCATION });
     const model = vertex_ai.preview.getGenerativeModel({
       model: MODEL_ID,
@@ -145,9 +136,9 @@ export async function handleChatQuery(req, res) {
           OBJETIVO: Asistir en Seguridad Ocupacional, RRHH y uso de la App Kaizen.
           
           REGLAS DE CONTENIDO:
-          - Sé flexible. Si la consulta es vaga pero relacionada al trabajo, respóndela.
+          - Sé flexible y útil. Si la consulta es general sobre trabajo o seguridad, respóndela.
           - SOLO rechaza temas explícitamente ajenos como cocina, videojuegos, chistes o política.
-          - Mensaje de rechazo: "⚠️ Tema fuera de alcance: Solo puedo asistir en SSOMA, RRHH o Kaizen."
+          - Mensaje de rechazo: "Tema fuera de alcance: Solo puedo asistir en SSOMA, RRHH o Kaizen."
 
           CAPACIDADES:
           - Auditoría: Revisa documentos (PDF/CSV) buscando errores numéricos o legales.
@@ -166,7 +157,6 @@ export async function handleChatQuery(req, res) {
       ]
     });
 
-    // 5. Construir Prompt
     const parts = [];
     let contextStr = text || "Analiza el contenido adjunto.";
     if (projectId) contextStr += `\n[Proyecto: ${projectId}]`;
@@ -174,17 +164,19 @@ export async function handleChatQuery(req, res) {
     
     parts.push({ text: contextStr });
 
-    // 6. Procesar Adjuntos (Manejo de Errores de Formato)
-    let fileWarning = "";
-
     for (const file of validFiles) {
       const buffer = fs.readFileSync(file.path);
       
-      // Textos planos (CSV, JSON, XML) -> Se inyectan como texto
+      if (file.mimetype.includes('spreadsheet') || file.mimetype.includes('excel') || file.mimetype.includes('word') || file.originalname.endsWith('.xlsx')) {
+          return res.json({ 
+              success: false, 
+              reply: "No pude analizar el archivo Excel (.xlsx). El modelo actual no soporta este formato directamente. Por favor, guarda tu planilla como PDF o CSV y súbela de nuevo." 
+          });
+      }
+      
       if (file.mimetype.match(/text|json|csv|xml/)) {
         parts.push({ text: `\n--- ARCHIVO: ${file.originalname} ---\n${buffer.toString('utf-8')}\n--- FIN ---\n` });
       } 
-      // Imágenes y PDF -> Inline Data (Soportado por Gemini)
       else if (file.mimetype.startsWith('image/') || file.mimetype === 'application/pdf') {
         parts.push({
           inlineData: {
@@ -193,17 +185,11 @@ export async function handleChatQuery(req, res) {
           }
         });
       }
-      // Excel y Word -> NO SOPORTADOS inline por ahora -> Avisar a la IA
-      else if (file.mimetype.includes('spreadsheet') || file.mimetype.includes('excel') || file.mimetype.includes('word')) {
-        fileWarning += `\n[SISTEMA]: El usuario adjuntó "${file.originalname}" (Excel/Word). Gemini no lee estos binarios directamente. Pide al usuario que los convierta a PDF o CSV para analizarlos.`;
-      }
     }
-
-    if (fileWarning) parts.push({ text: fileWarning });
 
     if (parts.length === 0 && !text) return res.json({ success: false, reply: "No hay datos para procesar." });
 
-    console.log(`🤖 Enviando a Gemini 2.0 (${validFiles.length} archivos)...`);
+    console.log(`Enviando a Gemini 2.0 (${validFiles.length} archivos)...`);
     
     const result = await model.generateContent({
       contents: [{ role: 'user', parts: parts }]
@@ -220,13 +206,12 @@ export async function handleChatQuery(req, res) {
     });
 
   } catch (error) {
-    console.error('🔥 Error:', error.message);
+    console.error('Error:', error.message);
     
     let userMessage = "Ocurrió un error interno en el servidor.";
     
-    // Manejo específico de error 400 (Formato inválido para Gemini)
     if (error.message.includes('400') || error.message.includes('INVALID_ARGUMENT')) {
-       userMessage = "⚠️ No pude analizar el archivo adjunto. Posiblemente el formato (ej. Excel .xlsx) no es compatible directamente. Por favor intenta subirlo como **PDF** o **CSV**.";
+       userMessage = "Error de formato: Uno de los archivos adjuntos no es compatible o está corrupto. Intenta subir solo PDF o Imágenes.";
     }
 
     res.status(500).json({ success: false, error: 'ai_error', message: userMessage });
