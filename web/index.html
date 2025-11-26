@@ -14,7 +14,7 @@
   <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 
-  <!-- Estilos -->
+  <!-- Estilos Propios -->
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -60,7 +60,7 @@
         <!-- Mensajes -->
         <div id="messages" class="messages">
             <!-- Estado Vacío (Bienvenida) -->
-            <div id="empty-state" class="empty-state">
+            <div id="empty-state" class="empty-state" style="display: none;">
                 <div class="empty-icon">
                     <img src="./assets/Icon App.png" alt="Logo">
                 </div>
@@ -81,7 +81,7 @@
 
         <!-- Input Area (Composer) -->
         <div class="composer">
-          <div class="bar-container"> <!-- Nuevo contenedor para centrar y limitar ancho -->
+          <div class="bar-container">
             <div class="bar">
               <label class="btn-attach" title="Adjuntar archivo">
                 <input id="fileInput" type="file" multiple />

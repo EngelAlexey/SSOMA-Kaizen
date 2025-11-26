@@ -1,19 +1,19 @@
 // --- CONFIGURACIÓN ---
-// Detectar si estamos en local o producción automáticamente
 const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-// Si es local, usa localhost:3000. Si es producción (Render), usa la URL relativa o la de Render.
-const API_URL = isLocal ? 'http://localhost:3000/chat/query' : 'https://ssoma-kaizen-api.onrender.com/chat/query'; 
 
-const LS_KEY = 'KAIZEN_SESSIONS_V4';
+// Usamos 127.0.0.1 en lugar de localhost para evitar conflictos de resolución IPv6
+const API_URL = isLocal 
+    ? 'http://127.0.0.1:3000/chat/query' 
+    : 'https://ssoma-kaizen-api.onrender.com/chat/query'; 
 
-// --- ESTADO DE LA APLICACIÓN ---
+const LS_KEY = 'KAIZEN_SESSIONS_V5';
+
 const state = {
     chats: [],
     currentId: null,
     files: []
 };
 
-// --- DOM CACHE ---
 const dom = {
     input: document.getElementById('input'),
     sendBtn: document.getElementById('sendBtn'),
@@ -31,27 +31,21 @@ const dom = {
     btnMenu: document.getElementById('btnMobileMenu')
 };
 
-// --- INICIO ---
 const app = {
     init() {
         this.loadFromStorage();
-        
-        // Si no hay chats, crear uno nuevo
         if (state.chats.length === 0) {
             this.createNewChat();
         } else {
-            // Cargar el último chat activo o el primero
             const lastActiveId = localStorage.getItem('KAIZEN_LAST_CHAT_ID');
             const targetId = state.chats.find(c => c.id === lastActiveId) ? lastActiveId : state.chats[0].id;
             this.loadChat(targetId);
         }
-        
         this.renderSidebar();
         this.bindEvents();
     },
 
     bindEvents() {
-        // Vincular función sendMessage al contexto de 'app'
         dom.sendBtn.addEventListener('click', () => this.sendMessage());
         
         dom.input.addEventListener('keydown', (e) => {
@@ -61,14 +55,12 @@ const app = {
             }
         });
 
-        // Auto-resize textarea
         dom.input.addEventListener('input', function() {
             this.style.height = 'auto';
             this.style.height = (this.scrollHeight) + 'px';
             if(this.value === '') this.style.height = 'auto';
         });
 
-        // Archivos
         dom.fileInput.addEventListener('change', (e) => {
             if (e.target.files.length > 0) {
                 state.files = Array.from(e.target.files);
@@ -82,19 +74,17 @@ const app = {
             this.renderFilePreview();
         });
 
-        // Navegación
         dom.btnNew.addEventListener('click', () => this.createNewChat());
         dom.btnMenu.addEventListener('click', () => this.toggleSidebar());
         dom.overlay.addEventListener('click', () => this.toggleSidebar(false));
     },
 
-    // --- GESTIÓN DE DATOS ---
     loadFromStorage() {
         try {
             const stored = localStorage.getItem(LS_KEY);
             state.chats = stored ? JSON.parse(stored) : [];
         } catch (e) {
-            console.error('Error cargando historial:', e);
+            console.error('Error storage:', e);
             state.chats = [];
         }
     },
@@ -105,7 +95,6 @@ const app = {
         this.renderSidebar();
     },
 
-    // --- LÓGICA DEL CHAT ---
     createNewChat() {
         const newChat = {
             id: Date.now().toString(),
@@ -116,7 +105,6 @@ const app = {
         state.chats.unshift(newChat);
         this.saveToStorage();
         this.loadChat(newChat.id);
-        
         if (window.innerWidth < 980) this.toggleSidebar(false);
         dom.input.focus();
     },
@@ -126,107 +114,84 @@ const app = {
         const chat = state.chats.find(c => c.id === id);
         if (!chat) return;
 
-        // Limpiar área de mensajes
         dom.messages.innerHTML = '';
-        // Reinsertar empty state (oculto)
         dom.messages.appendChild(dom.emptyState);
         
         if (chat.messages.length === 0) {
             dom.emptyState.style.display = 'flex';
         } else {
             dom.emptyState.style.display = 'none';
-            // Renderizar mensajes con un pequeño delay para evitar parpadeo brusco
-            requestAnimationFrame(() => {
-                chat.messages.forEach(msg => this.renderMessage(msg));
-                this.scrollToBottom();
+            // Usamos fragmento para renderizado atómico (sin parpadeo)
+            const fragment = document.createDocumentFragment();
+            chat.messages.forEach(msg => {
+                const el = this.createMessageElement(msg);
+                fragment.appendChild(el);
             });
+            dom.messages.appendChild(fragment);
+            this.scrollToBottom();
         }
-
         this.renderSidebar();
-        // Guardar ID actual
         localStorage.setItem('KAIZEN_LAST_CHAT_ID', id);
     },
 
     deleteChat(id, e) {
         e.stopPropagation();
-        if (!confirm('¿Eliminar este chat del historial?')) return;
-        
+        if (!confirm('¿Eliminar chat?')) return;
         state.chats = state.chats.filter(c => c.id !== id);
-        
-        if (state.chats.length === 0) {
-            this.createNewChat();
-        } else if (state.currentId === id) {
-            this.loadChat(state.chats[0].id);
-        }
+        if (state.chats.length === 0) this.createNewChat();
+        else if (state.currentId === id) this.loadChat(state.chats[0].id);
         this.saveToStorage();
     },
 
-    // --- ENVIAR MENSAJE ---
     async sendMessage() {
         const text = dom.input.value.trim();
         const files = [...state.files];
 
         if (!text && files.length === 0) return;
 
-        // 1. UI Optimista
         dom.emptyState.style.display = 'none';
-        this.renderMessage({ role: 'user', content: text, files: files });
+        this.appendMessageUI({ role: 'user', content: text, files: files });
         
-        // Guardar en historial
         const fileMeta = files.map(f => ({ name: f.name, type: f.type }));
         this.pushMessageToState('user', text, fileMeta);
 
-        // Limpiar
         dom.input.value = '';
         dom.input.style.height = 'auto';
         state.files = [];
         this.renderFilePreview();
 
-        // Loader
         const loaderId = this.showLoader();
         dom.sendBtn.disabled = true;
 
         try {
-            // 2. Preparar Datos
             const formData = new FormData();
             formData.append('text', text);
             files.forEach(f => formData.append('files', f));
 
-            // 3. Llamada API
-            console.log(`Enviando a: ${API_URL}`); // Log para depuración
-            const res = await fetch(API_URL, {
-                method: 'POST',
-                body: formData
-            });
+            console.log(`Enviando a: ${API_URL}`);
+            const res = await fetch(API_URL, { method: 'POST', body: formData });
 
-            if (!res.ok) {
-                throw new Error(`Error del servidor (${res.status})`);
-            }
-
+            if (!res.ok) throw new Error(`Error ${res.status}`);
             const data = await res.json();
+            
             this.removeLoader(loaderId);
 
             if (data.success) {
-                this.renderMessage({ role: 'ai', content: data.reply });
+                this.appendMessageUI({ role: 'ai', content: data.reply });
                 this.pushMessageToState('ai', data.reply);
                 
-                // Renombrar chat si es el primer mensaje
                 const current = state.chats.find(c => c.id === state.currentId);
                 if (current && current.messages.length <= 2 && text) {
                     current.title = text.length > 30 ? text.substring(0, 30) + '...' : text;
                     this.saveToStorage();
                 }
             } else {
-                this.renderMessage({ role: 'system', content: `⚠️ ${data.message || 'Error desconocido'}` });
+                this.appendMessageUI({ role: 'system', content: `⚠️ ${data.message}` });
             }
 
         } catch (error) {
             this.removeLoader(loaderId);
-            console.error(error);
-            this.renderMessage({ 
-                role: 'system', 
-                content: `❌ <strong>Error de conexión:</strong> No se pudo contactar con la API en <code>${API_URL}</code>.<br>Detalles: ${error.message}` 
-            });
+            this.appendMessageUI({ role: 'system', content: `❌ Error de conexión. Verifica que la API esté corriendo.` });
         } finally {
             dom.sendBtn.disabled = false;
             dom.input.focus();
@@ -241,27 +206,21 @@ const app = {
         }
     },
 
-    // --- RENDERIZADO UI ---
-    renderMessage(msg) {
+    createMessageElement(msg) {
         const div = document.createElement('div');
         div.className = `msg ${msg.role}`;
 
         if (msg.role === 'system') {
-            div.innerHTML = `<div style="width:100%; text-align:center; color:#ff6b6b; font-size:13px; background:rgba(255,0,0,0.1); padding:10px; border-radius:8px; border:1px solid rgba(255,0,0,0.2); max-width: 600px; margin: 0 auto 20px;">${msg.content}</div>`;
-            dom.messages.appendChild(div);
-            this.scrollToBottom();
-            return;
+            div.innerHTML = `<div style="width:100%; text-align:center; color:#ff6b6b; font-size:12px; background:rgba(255,0,0,0.1); padding:8px; border-radius:6px; max-width: 80%; margin:0 auto;">${msg.content}</div>`;
+            return div;
         }
 
         const avatarSrc = msg.role === 'ai' ? './assets/Kaizen B.png' : './assets/Icon App.png';
-        
-        // Si es 'ai', no mostramos el nombre en la meta
-        // Si es 'user', nombre "TÚ" pequeño y gris
         const label = msg.role === 'ai' ? 'KAIZEN AI' : 'TÚ';
 
         let filesHtml = '';
         if (msg.files && msg.files.length > 0) {
-            filesHtml = '<div style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:8px;">';
+            filesHtml = '<div style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:6px;">';
             msg.files.forEach(f => {
                 const fname = f.name || f;
                 filesHtml += `<div class="file-chip"><i class="fa-solid fa-paperclip"></i> ${fname}</div>`;
@@ -269,7 +228,6 @@ const app = {
             filesHtml += '</div>';
         }
 
-        // Renderizar Markdown solo para IA, texto plano para usuario (seguridad)
         const contentHtml = msg.role === 'ai' ? marked.parse(msg.content) : msg.content.replace(/\n/g, '<br>');
 
         div.innerHTML = `
@@ -280,8 +238,12 @@ const app = {
                 <div class="bubble ${msg.role === 'ai' ? 'markdown-body' : ''}">${contentHtml}</div>
             </div>
         `;
+        return div;
+    },
 
-        dom.messages.appendChild(div);
+    appendMessageUI(msg) {
+        const el = this.createMessageElement(msg);
+        dom.messages.appendChild(el);
         this.scrollToBottom();
     },
 
@@ -294,7 +256,7 @@ const app = {
                 <div class="t">${chat.title}</div>
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-top:2px;">
                     <span class="s">${new Date(chat.timestamp).toLocaleDateString()}</span>
-                    ${chat.id === state.currentId ? `<i class="fa-solid fa-trash text-xs text-gray-500 hover:text-red-500 p-1 z-10" onclick="app.deleteChat('${chat.id}', event)"></i>` : ''}
+                    ${chat.id === state.currentId ? `<i class="fa-solid fa-trash text-xs text-gray-500 hover:text-red-500 p-1" onclick="app.deleteChat('${chat.id}', event)"></i>` : ''}
                 </div>
             `;
             el.onclick = () => this.loadChat(chat.id);
@@ -306,9 +268,7 @@ const app = {
         if (state.files.length > 0) {
             dom.attachFloat.style.display = 'flex';
             dom.afName.textContent = `${state.files.length} archivo(s)`;
-            // Calcular tamaño total
-            const totalSize = state.files.reduce((acc, f) => acc + f.size, 0);
-            dom.afSize.textContent = (totalSize / 1024).toFixed(1) + ' KB';
+            dom.afSize.textContent = (state.files.reduce((a, f) => a + f.size, 0) / 1024).toFixed(1) + ' KB';
         } else {
             dom.attachFloat.style.display = 'none';
         }
@@ -340,7 +300,6 @@ const app = {
     toggleSidebar(force) {
         const isOpen = dom.sidebar.classList.contains('open');
         const shouldOpen = force !== undefined ? force : !isOpen;
-        
         if (shouldOpen) {
             dom.sidebar.classList.add('open');
             dom.overlay.classList.add('active');
@@ -351,5 +310,4 @@ const app = {
     }
 };
 
-// Inicializar
 document.addEventListener('DOMContentLoaded', () => app.init());
