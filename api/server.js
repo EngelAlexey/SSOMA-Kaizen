@@ -5,6 +5,7 @@ import cors from 'cors';
 import path from 'path';
 import fs from 'fs';
 import { handleChatQuery } from './src/routes/chatQuery.js';
+import { checkConnection } from './src/db.js';
 
 console.clear();
 console.log('🚀 INICIANDO SERVIDOR SSOMA-KAIZEN...');
@@ -80,6 +81,7 @@ app.use((err, req, res, next) => {
   res.status(500).json({ success: false, error: 'server_error', message: err.message });
 });
 
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`\n✅ SERVIDOR LISTO EN: http://localhost:${PORT}`);
+  await checkConnection();
 });

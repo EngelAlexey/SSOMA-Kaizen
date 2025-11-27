@@ -4,3 +4,5 @@ google-key.json
 *.json
 !package.json
 !package-lock.json
+api/certs/server-ca.pem
+**/certs

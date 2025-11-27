@@ -3,9 +3,11 @@ import fs from 'fs';
 import path from 'path';
 import FormData from 'form-data';
 import { VertexAI, HarmCategory, HarmBlockThreshold } from '@google-cloud/vertexai';
+import { randomUUID } from 'crypto';
 import 'dotenv/config';
-import { validarLicencia } from '../db.js'; // Importar tu nuevo módulo
+import { validarLicencia, registrarHilo } from '../db.js';
 
+const LICENCIA_DEV = 'KZN-DFA8-A9C5-BE6D-11F0';
 
 const MANUAL_KAIZEN = `
 MATRIZ DE USO KAIZEN (RESUMEN TÉCNICO):
@@ -78,25 +80,52 @@ async function validateFileSecurity(filePath, mimeType) {
 
 export async function handleChatQuery(req, res) {
   const filesToDelete = [];
-  const { text, license } = req.body;
+  let { text, license, projectId, threadId } = req.body;
 
+  const licenciaActual = license || LICENCIA_DEV;
   let contextoCliente = "";
-  if (license) {
-    try {
-      const datosLicencia = await validarLicencia(license);
-      if (datosLicencia) {
-        contextoCliente = `\n[CONTEXTO CLIENTE]\nEmpresa: ${datosLicencia.empresa}\nUsuario: ${datosLicencia.usuario_asignado}`;
-      } else {
-        return res.status(401).json({ error: "Licencia no válida o expirada." });
-      }
-    } catch (dbError) {
-      console.error("Error BD:", dbError);
-      return res.status(500).json({ error: "Error al validar la licencia." });
-    }
+  let clientPrefix = null;
+  let isNewThread = false;
+
+  if (!threadId) {
+      threadId = randomUUID();
+      isNewThread = true;
   }
 
   try {
-    const { text, projectId } = req.body || {};
+    const datosLicencia = await validarLicencia(licenciaActual);
+    
+    if (datosLicencia) {
+      clientPrefix = datosLicencia.client_prefix;
+      
+      if (isNewThread) {
+          try {
+              await registrarHilo(
+                  clientPrefix, 
+                  datosLicencia.licencia_id, 
+                  threadId, 
+                  'SSOMA-AI'
+              );
+          } catch (errDB) {
+              console.error(errDB.message);
+          }
+      }
+
+      contextoCliente = `\n[SISTEMA SEGURO - USUARIO VALIDADO]\n- Cliente: ${datosLicencia.empresa}\n- Prefijo DB: ${clientPrefix}\n- Usuario: ${datosLicencia.usuario_asignado}\n- Hilo ID: ${threadId}\n`;
+      console.log(`🔓 Acceso: ${datosLicencia.empresa} (${clientPrefix}) | Thread: ${threadId}`);
+    } else {
+      return res.status(401).json({ 
+        success: false, 
+        error: "ACCESO DENEGADO", 
+        message: "No se puede verificar la identidad del cliente." 
+      });
+    }
+  } catch (dbError) {
+    console.error(dbError);
+    return res.status(500).json({ error: "Error de seguridad en base de datos." });
+  }
+
+  try {
     const uploads = [];
     
     if (req.files && req.files.length > 0) {
@@ -151,16 +180,12 @@ export async function handleChatQuery(req, res) {
         parts: [{ text: `
           ERES SSOMA-KAIZEN.
           
-          OBJETIVO: Asistir en Seguridad Ocupacional, RRHH y uso de la App Kaizen.
+          REGLAS DE SEGURIDAD Y DATOS:
+          1. Estás atendiendo al cliente con prefijo: "${clientPrefix}".
+          2. Si necesitas consultar información, este cliente solo accede a sus propios datos.
+          3. Hilo ID: ${threadId}.
           
-          REGLAS DE CONTENIDO:
-          - Sé flexible y útil. Si la consulta es general sobre trabajo o seguridad, respóndela.
-          - SOLO rechaza temas explícitamente ajenos como cocina, videojuegos, chistes o política.
-          - Mensaje de rechazo: "Tema fuera de alcance: Solo puedo asistir en SSOMA, RRHH o Kaizen."
-
-          CAPACIDADES:
-          - Auditoría: Revisa documentos (PDF/CSV) buscando errores numéricos o legales.
-          - Visión: Analiza fotos de obra para detectar riesgos.
+          OBJETIVO: Asistir en Seguridad Ocupacional, RRHH y uso de la App Kaizen.
           
           [MANUAL KAIZEN]
           ${MANUAL_KAIZEN}
@@ -176,8 +201,10 @@ export async function handleChatQuery(req, res) {
     });
 
     const parts = [];
-    let contextStr = text || "Analiza el contenido adjunto.";
-    if (projectId) contextStr += `\n[Proyecto: ${projectId}]`;
+    
+    let contextStr = `${contextoCliente}\n${text || "Analiza lo siguiente:"}`;
+    
+    if (projectId) contextStr += `\n[Proyecto ID: ${projectId}]`;
     if (faceResults.length > 0) contextStr += `\n[Personal Identificado: ${JSON.stringify(faceResults)}]`;
     
     parts.push({ text: contextStr });
@@ -188,7 +215,7 @@ export async function handleChatQuery(req, res) {
       if (file.mimetype.includes('spreadsheet') || file.mimetype.includes('excel') || file.mimetype.includes('word') || file.originalname.endsWith('.xlsx')) {
           return res.json({ 
               success: false, 
-              reply: "No pude analizar el archivo Excel (.xlsx). El modelo actual no soporta este formato directamente. Por favor, guarda tu planilla como PDF o CSV y súbela de nuevo." 
+              reply: "No pude analizar el archivo Excel (.xlsx)." 
           });
       }
       
@@ -207,8 +234,6 @@ export async function handleChatQuery(req, res) {
 
     if (parts.length === 0 && !text) return res.json({ success: false, reply: "No hay datos para procesar." });
 
-    console.log(`Enviando a Gemini 2.0 (${validFiles.length} archivos)...`);
-    
     const result = await model.generateContent({
       contents: [{ role: 'user', parts: parts }]
     });
@@ -219,7 +244,9 @@ export async function handleChatQuery(req, res) {
     res.json({
       success: true,
       reply,
+      threadId,
       faceResults,
+      clientPrefix,
       tokensUsed: response.usageMetadata?.totalTokenCount || 0
     });
 
@@ -227,9 +254,8 @@ export async function handleChatQuery(req, res) {
     console.error('Error:', error.message);
     
     let userMessage = "Ocurrió un error interno en el servidor.";
-    
     if (error.message.includes('400') || error.message.includes('INVALID_ARGUMENT')) {
-       userMessage = "Error de formato: Uno de los archivos adjuntos no es compatible o está corrupto. Intenta subir solo PDF o Imágenes.";
+       userMessage = "Error de formato en los archivos adjuntos.";
     }
 
     res.status(500).json({ success: false, error: 'ai_error', message: userMessage });
