@@ -5,9 +5,20 @@ import FormData from 'form-data';
 import { VertexAI, HarmCategory, HarmBlockThreshold } from '@google-cloud/vertexai';
 import { randomUUID } from 'crypto';
 import 'dotenv/config';
-import { validarLicencia, registrarHilo } from '../db.js';
+import { validarLicencia, registrarHilo, query } from '../db.js';
 
 const LICENCIA_DEV = 'KZN-DFA8-A9C5-BE6D-11F0';
+
+const DB_SCHEMA = `
+ESQUEMA DE BASE DE DATOS (SOLO LECTURA):
+- rhStaff: ID, StaffCode, FirstName, LastName, Department, Position, Status
+- rhClockV: ClockID, StaffID, DateTime, Type (IN/OUT), DeviceID
+- rhAttendances: ID, StaffID, Date, CheckIn, CheckOut, WorkedHours
+- rhActions: ActionID, StaffID, Type (Vacation/Medical), StartDate, EndDate
+- rhAdjustments: AdjID, StaffID, Amount, Reason, Date
+- daDashboard: Información del cliente y licencia
+- daChatThread: Historial de conversaciones
+`;
 
 const MANUAL_KAIZEN = `
 MATRIZ DE USO KAIZEN (RESUMEN TÉCNICO):
@@ -78,6 +89,27 @@ async function validateFileSecurity(filePath, mimeType) {
   return true;
 }
 
+const tools = [
+  {
+    functionDeclarations: [
+      {
+        name: "consultar_base_datos",
+        description: "Ejecuta una consulta SQL SELECT para obtener datos. ESTRICTAMENTE SOLO LECTURA.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            sql_query: {
+              type: "STRING",
+              description: "Consulta SQL SELECT. Ejemplo: SELECT * FROM rhStaff WHERE Status='Active'"
+            }
+          },
+          required: ["sql_query"]
+        }
+      }
+    ]
+  }
+];
+
 export async function handleChatQuery(req, res) {
   const filesToDelete = [];
   let { text, license, projectId, threadId } = req.body;
@@ -85,12 +117,9 @@ export async function handleChatQuery(req, res) {
   const licenciaActual = license || LICENCIA_DEV;
   let contextoCliente = "";
   let clientPrefix = null;
-  let isNewThread = false;
-
-  if (!threadId) {
-      threadId = randomUUID();
-      isNewThread = true;
-  }
+  let isNewThread = !threadId;
+  
+  if (!threadId) threadId = randomUUID();
 
   try {
     const datosLicencia = await validarLicencia(licenciaActual);
@@ -100,28 +129,20 @@ export async function handleChatQuery(req, res) {
       
       if (isNewThread) {
           try {
-              await registrarHilo(
-                  clientPrefix, 
-                  datosLicencia.licencia_id, 
-                  threadId, 
-                  'SSOMA-AI'
-              );
-          } catch (errDB) {
-              console.error(errDB.message);
-          }
+              await registrarHilo(clientPrefix, datosLicencia.licencia_id, threadId, 'SSOMA-AI');
+          } catch (errDB) {}
       }
 
-      contextoCliente = `\n[SISTEMA SEGURO - USUARIO VALIDADO]\n- Cliente: ${datosLicencia.empresa}\n- Prefijo DB: ${clientPrefix}\n- Usuario: ${datosLicencia.usuario_asignado}\n- Hilo ID: ${threadId}\n`;
-      console.log(`🔓 Acceso: ${datosLicencia.empresa} (${clientPrefix}) | Thread: ${threadId}`);
+      contextoCliente = `
+[CONTEXTO DE SEGURIDAD Y DATOS]
+- Cliente: ${datosLicencia.empresa}
+- Prefijo DB: "${clientPrefix}"
+- Usuario ID: ${datosLicencia.licencia_id}
+`;
     } else {
-      return res.status(401).json({ 
-        success: false, 
-        error: "ACCESO DENEGADO", 
-        message: "No se puede verificar la identidad del cliente." 
-      });
+      return res.status(401).json({ success: false, error: "ACCESO DENEGADO" });
     }
   } catch (dbError) {
-    console.error(dbError);
     return res.status(500).json({ error: "Error de seguridad en base de datos." });
   }
 
@@ -151,9 +172,7 @@ export async function handleChatQuery(req, res) {
       try {
         await validateFileSecurity(file.path, file.mimetype);
         validFiles.push(file);
-      } catch (e) {
-        console.error(`Archivo bloqueado: ${file.originalname}`);
-      }
+      } catch (e) {}
     }
 
     let faceResults = [];
@@ -180,12 +199,14 @@ export async function handleChatQuery(req, res) {
         parts: [{ text: `
           ERES SSOMA-KAIZEN.
           
-          REGLAS DE SEGURIDAD Y DATOS:
-          1. Estás atendiendo al cliente con prefijo: "${clientPrefix}".
-          2. Si necesitas consultar información, este cliente solo accede a sus propios datos.
-          3. Hilo ID: ${threadId}.
-          
-          OBJETIVO: Asistir en Seguridad Ocupacional, RRHH y uso de la App Kaizen.
+          REGLAS CRÍTICAS DE BASE DE DATOS:
+          1. TU ACCESO ES ESTRICTAMENTE DE SOLO LECTURA (SELECT).
+          2. ESTÁ PROHIBIDO EJECUTAR SENTENCIAS UPDATE, DELETE, INSERT, DROP O ALTER.
+          3. Si el usuario solicita modificar, eliminar o crear datos (ej: "Borra la asistencia", "Cambia la hora", "Crea un empleado"), DEBES RECHAZAR LA SOLICITUD explicando que no tienes permisos de escritura.
+          4. Solo usa 'consultar_base_datos' para responder preguntas informativas.
+
+          ESQUEMA DISPONIBLE:
+          ${DB_SCHEMA}
           
           [MANUAL KAIZEN]
           ${MANUAL_KAIZEN}
@@ -201,7 +222,6 @@ export async function handleChatQuery(req, res) {
     });
 
     const parts = [];
-    
     let contextStr = `${contextoCliente}\n${text || "Analiza lo siguiente:"}`;
     
     if (projectId) contextStr += `\n[Proyecto ID: ${projectId}]`;
@@ -233,19 +253,49 @@ export async function handleChatQuery(req, res) {
     }
 
     if (parts.length === 0 && !text) return res.json({ success: false, reply: "No hay datos para procesar." });
+    
+    const chat = model.startChat({ tools: tools });
 
-    const result = await model.generateContent({
-      contents: [{ role: 'user', parts: parts }]
-    });
+    let result = await chat.sendMessage(parts);
+    let response = await result.response;
+    let functionCalls = response.functionCalls();
 
-    const response = await result.response;
+    while (functionCalls && functionCalls.length > 0) {
+        const call = functionCalls[0];
+        
+        if (call.name === "consultar_base_datos") {
+            const sql = call.args.sql_query || "";
+            
+            if (!sql.trim().toUpperCase().startsWith('SELECT')) {
+                const securityMsg = "ERROR DE SEGURIDAD: Solo se permiten consultas SELECT. UPDATE/DELETE/INSERT están bloqueados.";
+                result = await chat.sendMessage([{
+                    functionResponse: { name: "consultar_base_datos", response: { result: securityMsg } }
+                }]);
+            } else {
+                try {
+                    const dbRows = await query(sql);
+                    const dbResult = JSON.stringify(dbRows).substring(0, 15000);
+                    
+                    result = await chat.sendMessage([{
+                        functionResponse: { name: "consultar_base_datos", response: { result: dbResult } }
+                    }]);
+                } catch (err) {
+                    result = await chat.sendMessage([{
+                        functionResponse: { name: "consultar_base_datos", response: { error: err.message } }
+                    }]);
+                }
+            }
+        }
+        response = await result.response;
+        functionCalls = response.functionCalls();
+    }
+
     const reply = response.candidates?.[0]?.content?.parts?.[0]?.text || "Sin respuesta.";
 
     res.json({
       success: true,
       reply,
       threadId,
-      faceResults,
       clientPrefix,
       tokensUsed: response.usageMetadata?.totalTokenCount || 0
     });
