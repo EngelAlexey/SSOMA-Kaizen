@@ -9,15 +9,27 @@ import { validarLicencia, registrarHilo, query } from '../db.js';
 
 const LICENCIA_DEV = 'KZN-DFA8-A9C5-BE6D-11F0';
 
+// ESQUEMA ACTUALIZADO CON TUS TABLAS REALES
 const DB_SCHEMA = `
 ESQUEMA DE BASE DE DATOS (SOLO LECTURA):
-- rhStaff: ID, StaffCode, FirstName, LastName, Department, Position, Status
-- rhClockV: ClockID, StaffID, DateTime, Type (IN/OUT), DeviceID
-- rhAttendances: ID, StaffID, Date, CheckIn, CheckOut, WorkedHours
-- rhActions: ActionID, StaffID, Type (Vacation/Medical), StartDate, EndDate
-- rhAdjustments: AdjID, StaffID, Amount, Reason, Date
-- daDashboard: Información del cliente y licencia
-- daChatThread: Historial de conversaciones
+
+1. rhClockV (Marcajes):
+   - ClockID, ProjectID, StaffID, AttendanceID, ckTimestamp (Fecha/Hora), ckType (Entrada/Salida), ckLocation.
+
+2. rhAttendances (Asistencia procesada):
+   - AttendanceID, atDate, StaffID, JobpositionID, atEntrance, atDeparture, atHours, atClockin, atClockout.
+
+3. rhActions (Acciones de Personal/Vacaciones/Incapacidad):
+   - ActionID, acDate, StaffID, acType (Tipo de acción), acStatus, StartDate, EndDate.
+
+4. rhAdjustments (Ajustes/Bonos):
+   - AdjustmentID, adDate, StaffID, adType, adAmount, adObservations, adStatus.
+
+5. daDashboard (Clientes/Licencias):
+   - LicenseID, daClientPrefix, daClientName, daStatus, daExpiryDate.
+
+6. daChatThread (Historial):
+   - ctID, ctClientPrefix, ctLicenseID, ctThreadID.
 `;
 
 const MANUAL_KAIZEN = `
@@ -130,7 +142,9 @@ export async function handleChatQuery(req, res) {
       if (isNewThread) {
           try {
               await registrarHilo(clientPrefix, datosLicencia.licencia_id, threadId, 'SSOMA-AI');
-          } catch (errDB) {}
+          } catch (errDB) {
+              console.error("⚠️ Error al registrar hilo (No crítico):", errDB.message);
+          }
       }
 
       contextoCliente = `
@@ -143,6 +157,7 @@ export async function handleChatQuery(req, res) {
       return res.status(401).json({ success: false, error: "ACCESO DENEGADO" });
     }
   } catch (dbError) {
+    console.error(dbError);
     return res.status(500).json({ error: "Error de seguridad en base de datos." });
   }
 
@@ -199,14 +214,10 @@ export async function handleChatQuery(req, res) {
         parts: [{ text: `
           ERES SSOMA-KAIZEN.
           
-          REGLAS CRÍTICAS DE BASE DE DATOS:
-          1. TU ACCESO ES ESTRICTAMENTE DE SOLO LECTURA (SELECT).
-          2. ESTÁ PROHIBIDO EJECUTAR SENTENCIAS UPDATE, DELETE, INSERT, DROP O ALTER.
-          3. Si el usuario solicita modificar, eliminar o crear datos (ej: "Borra la asistencia", "Cambia la hora", "Crea un empleado"), DEBES RECHAZAR LA SOLICITUD explicando que no tienes permisos de escritura.
-          4. Solo usa 'consultar_base_datos' para responder preguntas informativas.
-
-          ESQUEMA DISPONIBLE:
-          ${DB_SCHEMA}
+          REGLAS DE DATOS:
+          1. SOLO puedes ejecutar consultas SELECT.
+          2. Esquema: ${DB_SCHEMA}
+          3. Filtra siempre por el contexto del cliente si es posible, o asume que la vista está filtrada.
           
           [MANUAL KAIZEN]
           ${MANUAL_KAIZEN}
@@ -231,14 +242,6 @@ export async function handleChatQuery(req, res) {
 
     for (const file of validFiles) {
       const buffer = fs.readFileSync(file.path);
-      
-      if (file.mimetype.includes('spreadsheet') || file.mimetype.includes('excel') || file.mimetype.includes('word') || file.originalname.endsWith('.xlsx')) {
-          return res.json({ 
-              success: false, 
-              reply: "No pude analizar el archivo Excel (.xlsx)." 
-          });
-      }
-      
       if (file.mimetype.match(/text|json|csv|xml/)) {
         parts.push({ text: `\n--- ARCHIVO: ${file.originalname} ---\n${buffer.toString('utf-8')}\n--- FIN ---\n` });
       } 
@@ -258,9 +261,18 @@ export async function handleChatQuery(req, res) {
 
     let result = await chat.sendMessage(parts);
     let response = await result.response;
-    let functionCalls = response.functionCalls();
+    
+    // --- CORRECCIÓN AQUÍ: Extracción manual de llamadas a función ---
+    // El SDK puede devolver las llamadas dentro de candidates[0].content.parts
+    let functionCalls = [];
+    if (response.candidates && response.candidates[0] && response.candidates[0].content && response.candidates[0].content.parts) {
+        functionCalls = response.candidates[0].content.parts
+            .filter(part => part.functionCall)
+            .map(part => part.functionCall);
+    }
+    // -----------------------------------------------------------------
 
-    while (functionCalls && functionCalls.length > 0) {
+    while (functionCalls.length > 0) {
         const call = functionCalls[0];
         
         if (call.name === "consultar_base_datos") {
@@ -286,8 +298,15 @@ export async function handleChatQuery(req, res) {
                 }
             }
         }
+        
         response = await result.response;
-        functionCalls = response.functionCalls();
+        // Volvemos a extraer para el siguiente ciclo si la IA encadenó pensamientos
+        functionCalls = [];
+        if (response.candidates && response.candidates[0] && response.candidates[0].content && response.candidates[0].content.parts) {
+            functionCalls = response.candidates[0].content.parts
+                .filter(part => part.functionCall)
+                .map(part => part.functionCall);
+        }
     }
 
     const reply = response.candidates?.[0]?.content?.parts?.[0]?.text || "Sin respuesta.";
@@ -302,16 +321,8 @@ export async function handleChatQuery(req, res) {
 
   } catch (error) {
     console.error('Error:', error.message);
-    
-    let userMessage = "Ocurrió un error interno en el servidor.";
-    if (error.message.includes('400') || error.message.includes('INVALID_ARGUMENT')) {
-       userMessage = "Error de formato en los archivos adjuntos.";
-    }
-
-    res.status(500).json({ success: false, error: 'ai_error', message: userMessage });
+    res.status(500).json({ success: false, error: 'ai_error', message: error.message });
   } finally {
-    setTimeout(() => {
-      filesToDelete.forEach(p => safeDelete(p));
-    }, 1000);
+    setTimeout(() => { filesToDelete.forEach(p => safeDelete(p)); }, 1000);
   }
 }
