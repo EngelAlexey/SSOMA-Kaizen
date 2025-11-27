@@ -10,25 +10,30 @@ import { validarLicencia, registrarHilo, query } from '../db.js';
 const LICENCIA_DEV = 'KZN-DFA8-A9C5-BE6D-11F0';
 
 const DB_SCHEMA = `
-ESQUEMA DE BASE DE DATOS (SOLO LECTURA):
+ESQUEMA DE BASE DE DATOS (MULTI-TENANT):
 
-1. rhStaff (Tabla MAESTRA de Personal):
-   - StaffID, stCode, stName (Nombre), stFirstsurname (1er Apellido), stSecondsurname (2do Apellido).
-   - stStatus (BIT: 1 = Activo, 0 = Inactivo). IMPORTANTE: Para contar activos usar 'WHERE stStatus = 1'.
-   - stEmail, stPhone, JobpositionID, CompanyID.
-   - stIncome (Fecha Ingreso), stDeparture (Fecha Salida).
+NOTA CRÍTICA: TODAS las tablas operativas (rh...) tienen la columna 'DatabaseID' que DEBE usarse para filtrar por cliente.
 
-2. rhClockV (Marcajes/Reloj):
-   - ClockID, StaffID, ckTimestamp (Fecha/Hora), ckType (Entrada/Salida).
+1. rhStaff (Personal):
+   - FILTRO OBLIGATORIO: DatabaseID (Ej: 'KZN', 'CPV')
+   - StaffID, stCode, stName, stFirstsurname, stSecondsurname.
+   - stStatus (1=Activo, 0=Inactivo).
+   - stEmail, stPhone, JobpositionID.
 
-3. rhAttendances (Asistencias Calculadas):
-   - AttendanceID, atDate, StaffID, atHours (Horas trabajadas).
+2. rhClockV (Marcajes):
+   - FILTRO OBLIGATORIO: DatabaseID
+   - ClockID, StaffID, ckTimestamp, ckType.
 
-4. daDashboard (Clientes/Licencias):
-   - LicenseID, daClientPrefix, daClientName.
+3. rhAttendances (Asistencias):
+   - FILTRO OBLIGATORIO: DatabaseID
+   - AttendanceID, atDate, StaffID, atHours.
 
-5. daChatThread (Historial):
-   - ctID, ctThreadID.
+4. rhActions (Acciones Personal):
+   - FILTRO OBLIGATORIO: DatabaseID
+   - ActionID, acType, StartDate, EndDate.
+
+5. daDashboard (Sistema):
+   - daClientPrefix (Equivalente a DatabaseID en esta tabla), daClientName.
 `;
 
 const MANUAL_KAIZEN = `
@@ -71,19 +76,18 @@ async function validateFileSecurity(filePath, mimeType) {
   return true;
 }
 
-// Definición de Herramientas más estricta
 const tools = [
   {
     functionDeclarations: [
       {
         name: "consultar_base_datos",
-        description: "HERRAMIENTA OBLIGATORIA para saber CUALQUIER dato numérico, lista de nombres, estado o conteo. Si el usuario pregunta 'cuántos', 'quiénes', 'lista', 'hay', DEBES ejecutar esta función.",
+        description: "Ejecuta SQL SELECT. OBLIGATORIA para datos. DEBE filtrar por DatabaseID.",
         parameters: {
           type: "OBJECT",
           properties: {
             sql_query: {
               type: "STRING",
-              description: "Consulta SQL SELECT válida. Ej: SELECT COUNT(*) as total FROM rhStaff WHERE stStatus = 1"
+              description: "Consulta SQL SELECT incluyendo 'WHERE DatabaseID = ...'"
             }
           },
           required: ["sql_query"]
@@ -113,15 +117,13 @@ export async function handleChatQuery(req, res) {
       if (isNewThread) {
           try {
               await registrarHilo(clientPrefix, datosLicencia.licencia_id, threadId, 'SSOMA-AI');
-          } catch (errDB) {
-             // Ignoramos error de duplicado si ocurre, para no detener el flujo
-          }
+          } catch (errDB) {}
       }
 
       contextoCliente = `
 [CONTEXTO DE SEGURIDAD]
 - Cliente: ${datosLicencia.empresa}
-- Prefijo DB: "${clientPrefix}"
+- Prefijo (DatabaseID): "${clientPrefix}"
 `;
     } else {
       return res.status(401).json({ success: false, error: "ACCESO DENEGADO" });
@@ -153,8 +155,22 @@ export async function handleChatQuery(req, res) {
       try { await validateFileSecurity(file.path, file.mimetype); validFiles.push(file); } catch (e) {}
     }
 
-    // Lógica facial (omitida por brevedad, se mantiene igual) ...
     let faceResults = [];
+    if (validFiles.length > 0 && FACE_API_URL) {
+      const images = validFiles.filter(f => f.mimetype.startsWith('image/'));
+      for (const img of images) {
+        try {
+          const stream = fs.createReadStream(img.path);
+          const formData = new FormData();
+          formData.append('file', stream);
+          const resp = await axios.post(`${FACE_API_URL}/identify_staff_from_image`, formData, { 
+            headers: formData.getHeaders(), timeout: 5000 
+          });
+          if (!resp.data.error) faceResults.push({ file: img.originalname, ...resp.data });
+          stream.destroy();
+        } catch (e) {}
+      }
+    }
 
     const vertex_ai = new VertexAI({ project: PROJECT_ID, location: LOCATION });
     const model = vertex_ai.preview.getGenerativeModel({
@@ -163,16 +179,20 @@ export async function handleChatQuery(req, res) {
         parts: [{ text: `
           ERES SSOMA-KAIZEN.
           
-          ¡REGLA DE ORO - CERO ALUCINACIONES!:
-          1. NO SABES NADA sobre los datos actuales (empleados, asistencias, números) a menos que consultes la base de datos.
-          2. Si te preguntan "cuántos", "quiénes" o "listado", DEBES usar la herramienta 'consultar_base_datos'.
-          3. PROHIBIDO inventar números. Si la herramienta falla o no devuelve datos, di: "No encontré información en la base de datos".
-          4. NUNCA respondas con una cifra (como 1374) si no ejecutaste SQL primero.
-
-          REGLAS DE SQL:
-          - Tu acceso es SOLO LECTURA (SELECT).
-          - Para "Activos" usa siempre: WHERE stStatus = 1
-          - Esquema: ${DB_SCHEMA}
+          REGLAS DE SEGURIDAD SQL (CRÍTICO):
+          1. Estás en una base de datos COMPARTIDA (Multi-tenant).
+          2. La columna para separar clientes es 'DatabaseID'.
+          3. TODA consulta a tablas 'rh...' (rhStaff, rhClockV, etc.) DEBE incluir: WHERE DatabaseID = '${clientPrefix}'
+          
+          EJEMPLO CORRECTO:
+          SELECT COUNT(*) FROM rhStaff WHERE stStatus = 1 AND DatabaseID = '${clientPrefix}'
+          
+          EJEMPLO PROHIBIDO (Hackeo):
+          SELECT COUNT(*) FROM rhStaff WHERE stStatus = 1
+          
+          Si no usas DatabaseID = '${clientPrefix}', estarás mezclando datos de otros clientes.
+          
+          Esquema: ${DB_SCHEMA}
           
           [MANUAL KAIZEN]
           ${MANUAL_KAIZEN}
@@ -181,7 +201,7 @@ export async function handleChatQuery(req, res) {
           ${REGLAMENTO_SSOMA}
         `}]
       },
-      generationConfig: { maxOutputTokens: 2048, temperature: 0.0 }, // Temperatura 0 para máxima precisión
+      generationConfig: { maxOutputTokens: 2048, temperature: 0.0 },
       safetySettings: [
         { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH }
       ]
@@ -191,10 +211,10 @@ export async function handleChatQuery(req, res) {
     let contextStr = `${contextoCliente}\n${text || "Analiza lo siguiente:"}`;
     
     if (projectId) contextStr += `\n[Proyecto ID: ${projectId}]`;
+    if (faceResults.length > 0) contextStr += `\n[Personal: ${JSON.stringify(faceResults)}]`;
     
     parts.push({ text: contextStr });
 
-    // Procesamiento de archivos ...
     for (const file of validFiles) {
       const buffer = fs.readFileSync(file.path);
       if (file.mimetype.match(/text|json|csv|xml/)) {
@@ -204,16 +224,13 @@ export async function handleChatQuery(req, res) {
       }
     }
 
-    if (parts.length === 0 && !text) return res.json({ success: false, reply: "No hay datos para procesar." });
+    if (parts.length === 0 && !text) return res.json({ success: false, reply: "No hay datos." });
     
     const chat = model.startChat({ tools: tools });
-
-    console.log(`🤖 Pregunta: ${text}`);
 
     let result = await chat.sendMessage(parts);
     let response = await result.response;
     
-    // Extracción robusta de llamadas a función
     let functionCalls = [];
     if (response.candidates?.[0]?.content?.parts) {
         functionCalls = response.candidates[0].content.parts
@@ -221,36 +238,44 @@ export async function handleChatQuery(req, res) {
             .map(part => part.functionCall);
     }
 
-    // SI NO HAY LLAMADAS A FUNCIÓN, LOGUEAMOS ADVERTENCIA
-    if (functionCalls.length === 0) {
-        console.log("⚠️ ALERTA: La IA respondió sin consultar la BD (Posible alucinación si pidió datos).");
-    }
-
     while (functionCalls.length > 0) {
         const call = functionCalls[0];
         
         if (call.name === "consultar_base_datos") {
             const sql = call.args.sql_query || "";
-            console.log(`🗄️ SQL Generado: ${sql}`); // LOG VITAL PARA DEPURAR
+            const sqlUpper = sql.toUpperCase();
             
-            if (!sql.trim().toUpperCase().startsWith('SELECT')) {
-                const securityMsg = "ERROR: Solo lectura permitida.";
+            // VALIDACIÓN DE SEGURIDAD ESTRICTA EN SERVIDOR
+            // 1. Solo SELECT
+            // 2. Debe contener 'DATABASEID'
+            // 3. Debe contener el prefijo del cliente
+            
+            let securityError = null;
+            if (!sqlUpper.startsWith('SELECT')) {
+                securityError = "ERROR: Solo se permiten consultas SELECT.";
+            } else if (!sqlUpper.includes("DATABASEID")) {
+                securityError = "ERROR CRÍTICO: Falta filtrar por 'DatabaseID'.";
+            } else if (!sqlUpper.includes(`'${clientPrefix.toUpperCase()}'`) && !sqlUpper.includes(`"${clientPrefix.toUpperCase()}"`)) {
+                securityError = `ERROR CRÍTICO: Debes filtrar por DatabaseID = '${clientPrefix}'`;
+            }
+
+            if (securityError) {
                 result = await chat.sendMessage([{
-                    functionResponse: { name: "consultar_base_datos", response: { result: securityMsg } }
+                    functionResponse: { name: "consultar_base_datos", response: { result: securityError } }
                 }]);
             } else {
                 try {
+                    console.log(`🗄️ SQL: ${sql}`);
                     const dbRows = await query(sql);
-                    console.log(`✅ Registros encontrados: ${dbRows.length}`); // LOG VITAL
+                    console.log(`✅ Filas: ${dbRows.length}`);
                     const dbResult = JSON.stringify(dbRows).substring(0, 15000);
                     
                     result = await chat.sendMessage([{
                         functionResponse: { name: "consultar_base_datos", response: { result: dbResult } }
                     }]);
                 } catch (err) {
-                    console.error(`❌ Error SQL: ${err.message}`);
                     result = await chat.sendMessage([{
-                        functionResponse: { name: "consultar_base_datos", response: { error: "Error de base de datos." } }
+                        functionResponse: { name: "consultar_base_datos", response: { error: err.message } }
                     }]);
                 }
             }
@@ -276,8 +301,8 @@ export async function handleChatQuery(req, res) {
     });
 
   } catch (error) {
-    console.error('🔥 Error Fatal:', error.message);
-    res.status(500).json({ success: false, error: 'ai_error', message: "Error interno del servidor." });
+    console.error('Error:', error.message);
+    res.status(500).json({ success: false, error: 'ai_error', message: "Error interno." });
   } finally {
     setTimeout(() => { filesToDelete.forEach(p => safeDelete(p)); }, 1000);
   }
