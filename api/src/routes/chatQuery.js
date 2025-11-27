@@ -9,26 +9,31 @@ import { validarLicencia, registrarHilo, query } from '../db.js';
 
 const LICENCIA_DEV = 'KZN-DFA8-A9C5-BE6D-11F0';
 
-// ESQUEMA ACTUALIZADO CON TUS TABLAS REALES
 const DB_SCHEMA = `
 ESQUEMA DE BASE DE DATOS (SOLO LECTURA):
 
-1. rhClockV (Marcajes):
+1. rhStaff (Personal/Colaboradores):
+   - StaffID, stCode, stName (Nombre), stFirstsurname (1er Apellido), stSecondsurname (2do Apellido).
+   - stStatus (1 = Activo, 0 = Inactivo).
+   - stEmail, stPhone, JobpositionID, CompanyID.
+   - stIncome (Fecha Ingreso), stDeparture (Fecha Salida).
+
+2. rhClockV (Marcajes):
    - ClockID, ProjectID, StaffID, AttendanceID, ckTimestamp (Fecha/Hora), ckType (Entrada/Salida), ckLocation.
 
-2. rhAttendances (Asistencia procesada):
+3. rhAttendances (Asistencia procesada):
    - AttendanceID, atDate, StaffID, JobpositionID, atEntrance, atDeparture, atHours, atClockin, atClockout.
 
-3. rhActions (Acciones de Personal/Vacaciones/Incapacidad):
-   - ActionID, acDate, StaffID, acType (Tipo de acción), acStatus, StartDate, EndDate.
+4. rhActions (Acciones de Personal/Vacaciones/Incapacidad):
+   - ActionID, acDate, StaffID, acType, acStatus, StartDate, EndDate.
 
-4. rhAdjustments (Ajustes/Bonos):
+5. rhAdjustments (Ajustes/Bonos):
    - AdjustmentID, adDate, StaffID, adType, adAmount, adObservations, adStatus.
 
-5. daDashboard (Clientes/Licencias):
+6. daDashboard (Clientes/Licencias):
    - LicenseID, daClientPrefix, daClientName, daStatus, daExpiryDate.
 
-6. daChatThread (Historial):
+7. daChatThread (Historial):
    - ctID, ctClientPrefix, ctLicenseID, ctThreadID.
 `;
 
@@ -112,7 +117,7 @@ const tools = [
           properties: {
             sql_query: {
               type: "STRING",
-              description: "Consulta SQL SELECT. Ejemplo: SELECT * FROM rhStaff WHERE Status='Active'"
+              description: "Consulta SQL SELECT."
             }
           },
           required: ["sql_query"]
@@ -142,9 +147,7 @@ export async function handleChatQuery(req, res) {
       if (isNewThread) {
           try {
               await registrarHilo(clientPrefix, datosLicencia.licencia_id, threadId, 'SSOMA-AI');
-          } catch (errDB) {
-              console.error("⚠️ Error al registrar hilo (No crítico):", errDB.message);
-          }
+          } catch (errDB) {}
       }
 
       contextoCliente = `
@@ -157,7 +160,6 @@ export async function handleChatQuery(req, res) {
       return res.status(401).json({ success: false, error: "ACCESO DENEGADO" });
     }
   } catch (dbError) {
-    console.error(dbError);
     return res.status(500).json({ error: "Error de seguridad en base de datos." });
   }
 
@@ -214,10 +216,16 @@ export async function handleChatQuery(req, res) {
         parts: [{ text: `
           ERES SSOMA-KAIZEN.
           
+          DIRECTRICES DE PRIVACIDAD Y SEGURIDAD (MÁXIMA PRIORIDAD):
+          1. NUNCA menciones nombres de tablas (ej: rhStaff), columnas (ej: stStatus) ni detalles técnicos en tu respuesta final.
+          2. NUNCA expliques cómo obtuviste los datos (ej: "Hice un SELECT..."). Solo da la respuesta.
+          3. Si ocurre un error técnico o falta una columna, responde: "Lo siento, no pude acceder a esa información en este momento". JAMÁS muestres el error de SQL.
+          4. Si no hay datos, di simplemente "No encontré registros". No inventes números.
+
           REGLAS DE DATOS:
-          1. SOLO puedes ejecutar consultas SELECT.
-          2. Esquema: ${DB_SCHEMA}
-          3. Filtra siempre por el contexto del cliente si es posible, o asume que la vista está filtrada.
+          - Tu acceso es SOLO LECTURA.
+          - Esquema: ${DB_SCHEMA}
+          - Para saber si un colaborador está activo, usa el campo stStatus = 1.
           
           [MANUAL KAIZEN]
           ${MANUAL_KAIZEN}
@@ -226,7 +234,7 @@ export async function handleChatQuery(req, res) {
           ${REGLAMENTO_SSOMA}
         `}]
       },
-      generationConfig: { maxOutputTokens: 2048, temperature: 0.2 },
+      generationConfig: { maxOutputTokens: 2048, temperature: 0.1 },
       safetySettings: [
         { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH }
       ]
@@ -262,15 +270,12 @@ export async function handleChatQuery(req, res) {
     let result = await chat.sendMessage(parts);
     let response = await result.response;
     
-    // --- CORRECCIÓN AQUÍ: Extracción manual de llamadas a función ---
-    // El SDK puede devolver las llamadas dentro de candidates[0].content.parts
     let functionCalls = [];
     if (response.candidates && response.candidates[0] && response.candidates[0].content && response.candidates[0].content.parts) {
         functionCalls = response.candidates[0].content.parts
             .filter(part => part.functionCall)
             .map(part => part.functionCall);
     }
-    // -----------------------------------------------------------------
 
     while (functionCalls.length > 0) {
         const call = functionCalls[0];
@@ -279,7 +284,7 @@ export async function handleChatQuery(req, res) {
             const sql = call.args.sql_query || "";
             
             if (!sql.trim().toUpperCase().startsWith('SELECT')) {
-                const securityMsg = "ERROR DE SEGURIDAD: Solo se permiten consultas SELECT. UPDATE/DELETE/INSERT están bloqueados.";
+                const securityMsg = "ERROR: Solo lectura permitida.";
                 result = await chat.sendMessage([{
                     functionResponse: { name: "consultar_base_datos", response: { result: securityMsg } }
                 }]);
@@ -292,15 +297,15 @@ export async function handleChatQuery(req, res) {
                         functionResponse: { name: "consultar_base_datos", response: { result: dbResult } }
                     }]);
                 } catch (err) {
+                    // Enmascaramos el error real a la IA para que no lo repita al usuario, pero le decimos que falló
                     result = await chat.sendMessage([{
-                        functionResponse: { name: "consultar_base_datos", response: { error: err.message } }
+                        functionResponse: { name: "consultar_base_datos", response: { error: "Error interno al consultar datos." } }
                     }]);
                 }
             }
         }
         
         response = await result.response;
-        // Volvemos a extraer para el siguiente ciclo si la IA encadenó pensamientos
         functionCalls = [];
         if (response.candidates && response.candidates[0] && response.candidates[0].content && response.candidates[0].content.parts) {
             functionCalls = response.candidates[0].content.parts
@@ -321,8 +326,16 @@ export async function handleChatQuery(req, res) {
 
   } catch (error) {
     console.error('Error:', error.message);
-    res.status(500).json({ success: false, error: 'ai_error', message: error.message });
+    
+    let userMessage = "Ocurrió un error interno en el servidor.";
+    if (error.message.includes('400') || error.message.includes('INVALID_ARGUMENT')) {
+       userMessage = "Error de formato en los archivos adjuntos.";
+    }
+
+    res.status(500).json({ success: false, error: 'ai_error', message: userMessage });
   } finally {
-    setTimeout(() => { filesToDelete.forEach(p => safeDelete(p)); }, 1000);
+    setTimeout(() => {
+      filesToDelete.forEach(p => safeDelete(p));
+    }, 1000);
   }
 }
