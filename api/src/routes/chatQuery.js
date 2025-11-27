@@ -4,6 +4,8 @@ import path from 'path';
 import FormData from 'form-data';
 import { VertexAI, HarmCategory, HarmBlockThreshold } from '@google-cloud/vertexai';
 import 'dotenv/config';
+import { validarLicencia } from '../db.js'; // Importar tu nuevo módulo
+
 
 const MANUAL_KAIZEN = `
 MATRIZ DE USO KAIZEN (RESUMEN TÉCNICO):
@@ -76,6 +78,22 @@ async function validateFileSecurity(filePath, mimeType) {
 
 export async function handleChatQuery(req, res) {
   const filesToDelete = [];
+  const { text, license } = req.body;
+
+  let contextoCliente = "";
+  if (license) {
+    try {
+      const datosLicencia = await validarLicencia(license);
+      if (datosLicencia) {
+        contextoCliente = `\n[CONTEXTO CLIENTE]\nEmpresa: ${datosLicencia.empresa}\nUsuario: ${datosLicencia.usuario_asignado}`;
+      } else {
+        return res.status(401).json({ error: "Licencia no válida o expirada." });
+      }
+    } catch (dbError) {
+      console.error("Error BD:", dbError);
+      return res.status(500).json({ error: "Error al validar la licencia." });
+    }
+  }
 
   try {
     const { text, projectId } = req.body || {};
