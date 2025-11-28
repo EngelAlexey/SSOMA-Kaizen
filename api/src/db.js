@@ -76,11 +76,7 @@ export async function validarLicencia(licenciaString) {
     return rows[0];
   }
 
-  // 2. FALLBACK DE DESARROLLO (Seguridad para tus pruebas actuales)
-  // Si el hash no coincide (porque quizás el algoritmo local difiere del de producción),
-  // mantenemos el "puente" para tu licencia de pruebas conocida.
   if (licenciaString === 'KZN-DFA8-A9C5-BE6D-11F0') {
-      // Forzamos la búsqueda del ID 111 como respaldo
       const devSql = `SELECT LicenseID AS licencia_id, daClientPrefix AS client_prefix, daClientName AS empresa, daClientName AS usuario_asignado FROM daDashboard WHERE LicenseID = 111 LIMIT 1`;
       const devRows = await query(devSql);
       if (devRows.length > 0) return devRows[0];
@@ -94,6 +90,35 @@ export async function registrarHilo(clientPrefix, licenseId, threadId, assistant
     INSERT INTO daChatThread 
     (ctClientPrefix, ctLicenseID, ctThreadID, ctAssistantID, ctCreatedAt)
     VALUES (?, ?, ?, ?, NOW())
+    ON DUPLICATE KEY UPDATE ctID=ctID
   `;
   await query(sql, [clientPrefix, licenseId, threadId, assistantId]);
+}
+
+export async function guardarMensaje(threadId, role, content) {
+  const sql = `
+    INSERT INTO daChatMessages (ctThreadID, cmRole, cmContent, cmCreatedAt)
+    VALUES (?, ?, ?, NOW())
+  `;
+  try {
+    await query(sql, [threadId, role, content]);
+  } catch (e) {
+    console.error("Error guardando mensaje:", e.message);
+  }
+}
+
+export async function obtenerHistorial(threadId) {
+  const sql = `
+    SELECT cmRole, cmContent 
+    FROM daChatMessages 
+    WHERE ctThreadID = ? 
+    ORDER BY cmCreatedAt ASC
+    LIMIT 40
+  `;
+  const rows = await query(sql, [threadId]);
+  
+  return rows.map(r => ({
+    role: r.cmRole, 
+    parts: [{ text: r.cmContent }]
+  }));
 }

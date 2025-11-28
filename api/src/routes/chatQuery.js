@@ -5,38 +5,42 @@ import FormData from 'form-data';
 import { VertexAI, HarmCategory, HarmBlockThreshold } from '@google-cloud/vertexai';
 import { randomUUID } from 'crypto';
 import 'dotenv/config';
-import { validarLicencia, registrarHilo, query } from '../db.js';
+import { validarLicencia, registrarHilo, query, guardarMensaje, obtenerHistorial } from '../db.js';
 
 const LICENCIA_DEV = 'KZN-DFA8-A9C5-BE6D-11F0';
 
 const DB_SCHEMA = `
-INSTRUCCIONES TÉCNICAS SQL (USO INTERNO):
-1. ENTORNO: MySQL/MariaDB Multi-Tenant.
-2. FILTRO OBLIGATORIO: 'WHERE DatabaseID = ...' en CADA tabla.
-3. JOINS: Usa 'StaffID' para unir tablas.
+INSTRUCCIONES TÉCNICAS SQL (USO EXCLUSIVO INTERNO):
+- Entorno: Multi-Tenant.
+- FILTRO OBLIGATORIO: 'DatabaseID' en el WHERE de CADA tabla consultada.
+- RELACIONES (JOINS): La columna 'StaffID' es la clave única que conecta 'rhStaff' con todas las demás tablas.
 
-MANEJO DE FECHAS (CRÍTICO):
-- Las columnas de fecha son tipo DATETIME o DATE.
-- PARA FILTRAR POR FECHA ESPECÍFICA: Usa la función DATE().
-  - CORRECTO: WHERE DATE(ckTimestamp) = '2023-11-28'
-- PARA "HOY": Usa CURDATE(). Ej: WHERE atDate = CURDATE()
-- PARA RANGOS: WHERE atDate BETWEEN '2023-01-01' AND '2023-01-31'
+TABLAS Y COLUMNAS:
 
-TABLAS:
-1. rhStaff (Personal):
-   - DatabaseID, StaffID, stName, stFirstsurname, stStatus (1=Activo).
+1. rhStaff (Maestra de Personal):
+   - PK: StaffID
+   - Columnas: DatabaseID, StaffID, stCode (Código), stName, stFirstsurname, stSecondsurname, stStatus (1=Activo), stEmail, stPhone, stIncome (Fecha Ingreso), JobpositionID.
+
 2. rhAttendances (Asistencias):
-   - DatabaseID, AttendanceID, atDate (YYYY-MM-DD), StaffID, atHours, atEntrance, atDeparture.
-3. rhClockV (Marcas Reloj):
-   - DatabaseID, ClockID, StaffID, ckTimestamp (YYYY-MM-DD HH:MM:SS), ckType.
-4. rhActions (Acciones):
-   - DatabaseID, ActionID, StaffID, acDate, acType.
-5. rhAdjustments (Ajustes):
-   - DatabaseID, AdjustmentID, StaffID, adDate, adType, adAmount.
+   - FK: StaffID
+   - Columnas: DatabaseID, AttendanceID, atDate, StaffID, atHours, atEntrance, atDeparture.
+
+3. rhActions (Historial de Acciones/RRHH):
+   - FK: StaffID
+   - Columnas: DatabaseID, ActionID, StaffID, acDate, acType (Ej: 'Vacaciones', 'Incapacidad', 'Amonestación'), StartDate, EndDate, acStatus.
+
+4. rhAdjustments (Ajustes Salariales/Bonos):
+   - FK: StaffID
+   - Columnas: DatabaseID, AdjustmentID, StaffID, adDate, adType, adAmount, adObservations.
+
+5. rhClockV (Marcas Crudas de Reloj):
+   - FK: StaffID
+   - Columnas: DatabaseID, ClockID, StaffID, ckTimestamp, ckType, ckLocation.
 `;
 
 const MANUAL_KAIZEN = `
-[BASE DE CONOCIMIENTO]
+[BASE DE CONOCIMIENTO - NO USAR SQL PARA ESTO]
+
 1. USO DE APP KAIZEN:
    - PERMISOS: Inicio > Permisos.
    - USUARIOS: Login con Google.
@@ -84,13 +88,13 @@ const tools = [
     functionDeclarations: [
       {
         name: "consultar_base_datos",
-        description: "Ejecuta SQL SELECT. Úsala para preguntas sobre datos (quién, cuántos, fechas, hoy).",
+        description: "Ejecuta SQL SELECT. Úsala para obtener datos puntuales, listas o perfiles completos de colaboradores uniendo tablas.",
         parameters: {
           type: "OBJECT",
           properties: {
             sql_query: {
               type: "STRING",
-              description: "SQL SELECT válido para MySQL. Recuerda filtrar por DatabaseID y usar DATE() para columnas de tiempo."
+              description: "Consulta SQL SELECT. Soporta JOINs. Debe incluir 'WHERE DatabaseID = ...'"
             }
           },
           required: ["sql_query"]
@@ -116,6 +120,7 @@ export async function handleChatQuery(req, res) {
     
     if (datosLicencia) {
       clientPrefix = datosLicencia.client_prefix;
+      
       if (isNewThread) {
           try { await registrarHilo(clientPrefix, datosLicencia.licencia_id, threadId, 'SSOMA-AI'); } catch (e) {}
       }
@@ -170,6 +175,13 @@ export async function handleChatQuery(req, res) {
       }
     }
 
+    let history = [];
+    if (!isNewThread) {
+        try {
+            history = await obtenerHistorial(threadId);
+        } catch (e) { console.error("Error historial:", e); }
+    }
+
     const vertex_ai = new VertexAI({ project: PROJECT_ID, location: LOCATION });
     const model = vertex_ai.preview.getGenerativeModel({
       model: MODEL_ID,
@@ -202,6 +214,7 @@ export async function handleChatQuery(req, res) {
     });
 
     const parts = [];
+    
     let contextStr = `${contextoCliente}\n${text || "Analiza lo siguiente:"}`;
     
     if (projectId) contextStr += `\n[Proyecto ID: ${projectId}]`;
@@ -220,7 +233,10 @@ export async function handleChatQuery(req, res) {
 
     if (parts.length === 0 && !text) return res.json({ success: false, reply: "No hay datos." });
     
-    const chat = model.startChat({ tools: tools });
+    const chat = model.startChat({ 
+        tools: tools,
+        history: history 
+    });
 
     let result = await chat.sendMessage(parts);
     let response = await result.response;
@@ -286,6 +302,13 @@ export async function handleChatQuery(req, res) {
     }
 
     const reply = response.candidates?.[0]?.content?.parts?.[0]?.text || "Sin respuesta.";
+
+    if (threadId && text) {
+        await guardarMensaje(threadId, 'user', text);
+    }
+    if (threadId && reply) {
+        await guardarMensaje(threadId, 'model', reply);
+    }
 
     res.json({
       success: true,
