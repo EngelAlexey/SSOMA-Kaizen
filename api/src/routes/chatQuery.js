@@ -229,6 +229,8 @@ export async function handleChatQuery(req, res) {
     let result = await chat.sendMessage(parts);
     let response = await result.response;
     
+    // --- LÓGICA CORREGIDA PARA MANEJAR MÚLTIPLES LLAMADAS EN PARALELO ---
+    
     let functionCalls = [];
     if (response.candidates?.[0]?.content?.parts) {
         functionCalls = response.candidates[0].content.parts
@@ -237,43 +239,56 @@ export async function handleChatQuery(req, res) {
     }
 
     while (functionCalls.length > 0) {
-        const call = functionCalls[0];
-        
-        if (call.name === "consultar_base_datos") {
-            const sql = call.args.sql_query || "";
-            const sqlUpper = sql.toUpperCase();
-            
-            let securityError = null;
-            if (!sqlUpper.startsWith('SELECT')) {
-                securityError = "Error: Operación no permitida.";
-            } else if (!sqlUpper.includes("DATABASEID")) {
-                securityError = "Error: Filtro de seguridad faltante."; 
-            } else if (!sqlUpper.includes(`'${clientPrefix.toUpperCase()}'`) && !sqlUpper.includes(`"${clientPrefix.toUpperCase()}"`)) {
-                securityError = "Error: Acceso a datos cruzados bloqueado.";
-            }
+        // Array para acumular TODAS las respuestas de este turno
+        const responses = [];
 
-            if (securityError) {
-                result = await chat.sendMessage([{
-                    functionResponse: { name: "consultar_base_datos", response: { error: "Restricción de seguridad." } }
-                }]);
-            } else {
-                try {
-                    const dbRows = await query(sql);
-                    const dbResult = JSON.stringify(dbRows).substring(0, 25000); // Aumentado para soportar JOINs grandes
-                    
-                    result = await chat.sendMessage([{
-                        functionResponse: { name: "consultar_base_datos", response: { result: dbResult } }
-                    }]);
-                } catch (err) {
-                    console.error(`Error SQL: ${err.message}`);
-                    result = await chat.sendMessage([{
-                        functionResponse: { name: "consultar_base_datos", response: { error: "Error técnico en consulta." } }
-                    }]);
+        // Procesamos todas las llamadas de función solicitadas por el modelo
+        for (const call of functionCalls) {
+            if (call.name === "consultar_base_datos") {
+                const sql = call.args.sql_query || "";
+                const sqlUpper = sql.toUpperCase();
+                
+                let queryResult;
+                let securityError = null;
+
+                if (!sqlUpper.startsWith('SELECT')) {
+                    securityError = "Error: Operación no permitida (Solo SELECT).";
+                } else if (!sqlUpper.includes("DATABASEID")) {
+                    securityError = "Error: Filtro de seguridad faltante (DatabaseID)."; 
+                } else if (!sqlUpper.includes(`'${clientPrefix.toUpperCase()}'`) && !sqlUpper.includes(`"${clientPrefix.toUpperCase()}"`)) {
+                    securityError = "Error: Acceso a datos cruzados bloqueado.";
                 }
+
+                if (securityError) {
+                    queryResult = { error: securityError };
+                } else {
+                    try {
+                        const dbRows = await query(sql);
+                        // Limitamos el tamaño para no desbordar el contexto de la IA
+                        queryResult = { result: JSON.stringify(dbRows).substring(0, 25000) };
+                    } catch (err) {
+                        console.error(`Error SQL: ${err.message}`);
+                        queryResult = { error: "Error técnico en consulta SQL." };
+                    }
+                }
+
+                // Agregamos la respuesta al array (NO enviamos todavía)
+                responses.push({
+                    functionResponse: {
+                        name: "consultar_base_datos",
+                        response: queryResult
+                    }
+                });
             }
         }
-        
-        response = await result.response;
+
+        // Enviamos TODAS las respuestas juntas de vuelta al modelo
+        if (responses.length > 0) {
+            result = await chat.sendMessage(responses);
+            response = await result.response;
+        }
+
+        // Verificamos si el modelo quiere llamar a más funciones en el siguiente turno
         functionCalls = [];
         if (response.candidates?.[0]?.content?.parts) {
             functionCalls = response.candidates[0].content.parts
@@ -294,7 +309,7 @@ export async function handleChatQuery(req, res) {
 
   } catch (error) {
     console.error('Error:', error.message);
-    res.status(500).json({ success: false, error: 'ai_error', message: "Error interno." });
+    res.status(500).json({ success: false, error: 'ai_error', message: "Ocurrió un error inesperado." });
   } finally {
     setTimeout(() => { filesToDelete.forEach(p => safeDelete(p)); }, 1000);
   }
