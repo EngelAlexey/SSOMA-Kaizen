@@ -626,13 +626,13 @@ main { display: flex; flex-direction: column; height: 100%; overflow: hidden; }
 }
 
 .modal-btn.primary {
-  background: #6366f1; /* Indigo */
+  background: #ef4444; /* Rojo */
   color: #fff;
-  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+  box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3);
 }
 
 .modal-btn.primary:hover {
-  background: #4f46e5;
+  background: #dc2626;
   transform: translateY(-1px);
 }
 
