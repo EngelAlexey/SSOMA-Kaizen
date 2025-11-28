@@ -10,50 +10,53 @@ import { validarLicencia, registrarHilo, query } from '../db.js';
 const LICENCIA_DEV = 'KZN-DFA8-A9C5-BE6D-11F0';
 
 const DB_SCHEMA = `
-INSTRUCCIONES TÉCNICAS SQL (SOLO PARA USO INTERNO DE LA HERRAMIENTA):
-- Entorno Multi-Tenant (Varios clientes en la misma tabla).
-- FILTRO OBLIGATORIO DE SEGURIDAD: 'DatabaseID'.
-- JAMÁS reveles nombres de tablas o columnas al usuario.
+INSTRUCCIONES TÉCNICAS SQL (USO EXCLUSIVO INTERNO):
+- Entorno: Multi-Tenant.
+- FILTRO OBLIGATORIO: 'DatabaseID' en el WHERE de CADA tabla consultada.
+- RELACIONES (JOINS): La columna 'StaffID' es la clave única que conecta 'rhStaff' con todas las demás tablas.
 
-TABLAS DISPONIBLES PARA CONSULTAS (SOLO SELECT):
+TABLAS Y COLUMNAS:
 
-1. rhStaff (Personal y Colaboradores):
-   - COLUMNAS: DatabaseID, StaffID, stCode, stName (Nombre), stFirstsurname, stSecondsurname, stStatus (1=Activo), stEmail, stPhone, JobpositionID, stIncome (Fecha Ingreso).
+1. rhStaff (Maestra de Personal):
+   - PK: StaffID
+   - Columnas: DatabaseID, StaffID, stCode (Código), stName, stFirstsurname, stSecondsurname, stStatus (1=Activo), stEmail, stPhone, stIncome (Fecha Ingreso), JobpositionID.
 
-2. rhClockV (Marcajes de Reloj):
-   - COLUMNAS: DatabaseID, ClockID, StaffID, ckTimestamp (Fecha/Hora exacta), ckType (Entrada/Salida), ckLocation.
+2. rhAttendances (Asistencias):
+   - FK: StaffID
+   - Columnas: DatabaseID, AttendanceID, atDate, StaffID, atHours, atEntrance, atDeparture.
 
-3. rhAttendances (Asistencias Procesadas/Cálculo de Horas):
-   - COLUMNAS: DatabaseID, AttendanceID, atDate, StaffID, atHours (Horas trabajadas), atEntrance, atDeparture.
+3. rhActions (Historial de Acciones/RRHH):
+   - FK: StaffID
+   - Columnas: DatabaseID, ActionID, StaffID, acDate, acType (Ej: 'Vacaciones', 'Incapacidad', 'Amonestación'), StartDate, EndDate, acStatus.
 
-4. rhActions (Acciones de Personal, Vacaciones, Incapacidades):
-   - COLUMNAS: DatabaseID, ActionID, StaffID, acDate, acType (Ej: 'Vacaciones', 'Incapacidad'), StartDate, EndDate, acStatus.
+4. rhAdjustments (Ajustes Salariales/Bonos):
+   - FK: StaffID
+   - Columnas: DatabaseID, AdjustmentID, StaffID, adDate, adType, adAmount, adObservations.
 
-5. rhAdjustments (Ajustes Salariales, Bonos, Deducciones):
-   - COLUMNAS: DatabaseID, AdjustmentID, StaffID, adDate, adType, adAmount (Monto), adObservations.
+5. rhClockV (Marcas Crudas de Reloj):
+   - FK: StaffID
+   - Columnas: DatabaseID, ClockID, StaffID, ckTimestamp, ckType, ckLocation.
 `;
 
 const MANUAL_KAIZEN = `
-[BASE DE CONOCIMIENTO - MANUAL DE USUARIO Y NORMATIVA]
+[BASE DE CONOCIMIENTO - NO USAR SQL PARA ESTO]
 
-1. APP KAIZEN - GUÍA RÁPIDA:
-   - PERMISOS: Se gestionan en Inicio > Permisos. Niveles: Contribuir o Administrar.
-   - EMPRESAS: Registro de terceros en Inicio > Empresas.
-   - USUARIOS: El acceso es mediante correo Google (G-Suite).
-   - PERSONAL: Para crear un colaborador se requiere Expediente, Foto y Contrato firmado.
-   - ASISTENCIAS: Si editas una marca manual, es obligatorio usar el botón 'RECALC' para actualizar las horas.
-   - PLANILLAS: Flujo: Crear > Resumen > Recalc > Enviar a Pago.
+1. USO DE APP KAIZEN:
+   - PERMISOS: Inicio > Permisos.
+   - USUARIOS: Login con Google.
+   - PERSONAL: Requiere expediente completo.
+   - ASISTENCIAS: Editar requiere 'RECALC'.
 
-2. NORMATIVA LABORAL Y CÁLCULOS (COSTA RICA):
-   - IMPUESTO DE RENTA: Se calcula sobre el salario bruto excedente de la base exenta definida por Hacienda. Es una tarifa progresiva (10%, 15%, 20%, 25%). No depende de la base de datos, es una norma legal.
-   - CCSS (CAJA): La deducción obrera es del 10.67% sobre el salario reportado.
-   - HORAS EXTRAS: Se pagan a tiempo y medio (1.5x) sobre el valor de la hora ordinaria.
-   - AGUINALDO: Promedio de salarios brutos desde Diciembre del año anterior a Noviembre del actual, dividido entre 12.
+2. NORMATIVA LABORAL (CR):
+   - RENTA: Escala progresiva sobre exceso de base exenta.
+   - CCSS: 10.67% deducción obrera.
+   - HORAS EXTRAS: Valor 1.5x.
+   - AGUINALDO: Promedio salarios brutos / 12.
 
-3. SEGURIDAD OCUPACIONAL (SSOMA):
-   - TRABAJO EN ALTURAS: Obligatorio arnés y línea de vida sobre 1.8 metros.
-   - ZANJAS: Requieren entibado o talud si la profundidad excede 1.5 metros.
-   - EPP BÁSICO: Casco, botas de seguridad, chaleco reflectivo y gafas de protección (Art 81).
+3. SEGURIDAD (SSOMA):
+   - Alturas >1.8m: Arnés obligatorio.
+   - Zanjas >1.5m: Entibado.
+   - EPP: Casco, botas, chaleco, gafas.
 `;
 
 const PROJECT_ID = process.env.PROJECT_ID || 'causal-binder-459316-v6';
@@ -85,13 +88,13 @@ const tools = [
     functionDeclarations: [
       {
         name: "consultar_base_datos",
-        description: "HERRAMIENTA SOLO PARA DATOS EN TIEMPO REAL. Úsala si preguntan: 'cuántos', 'quién', 'lista de', 'estatus de', 'asistencias de hoy'. NO LA USES para preguntas de 'cómo se calcula', 'qué es' o normativa.",
+        description: "Ejecuta SQL SELECT. Úsala para obtener datos puntuales, listas o perfiles completos de colaboradores uniendo tablas.",
         parameters: {
           type: "OBJECT",
           properties: {
             sql_query: {
               type: "STRING",
-              description: "Consulta SQL SELECT incluyendo obligatoriamente 'WHERE DatabaseID = ...'"
+              description: "Consulta SQL SELECT. Soporta JOINs. Debe incluir 'WHERE DatabaseID = ...'"
             }
           },
           required: ["sql_query"]
@@ -122,9 +125,9 @@ export async function handleChatQuery(req, res) {
       }
 
       contextoCliente = `
-[CONTEXTO DE SESIÓN]
-- Cliente Identificado: ${datosLicencia.empresa}
-- Tu ID de Base de Datos (DatabaseID) es: "${clientPrefix}"
+[SESIÓN ACTIVA]
+- Cliente: ${datosLicencia.empresa}
+- DatabaseID: "${clientPrefix}"
 `;
     } else {
       return res.status(401).json({ success: false, error: "ACCESO DENEGADO" });
@@ -135,9 +138,7 @@ export async function handleChatQuery(req, res) {
 
   try {
     const uploads = [];
-    if (req.files && req.files.length > 0) {
-      req.files.forEach(f => { uploads.push(f); filesToDelete.push(f.path); });
-    }
+    if (req.files) req.files.forEach(f => { uploads.push(f); filesToDelete.push(f.path); });
     
     if (req.body.files && Array.isArray(req.body.files)) {
       for (const f of req.body.files) {
@@ -178,28 +179,27 @@ export async function handleChatQuery(req, res) {
       model: MODEL_ID,
       systemInstruction: {
         parts: [{ text: `
-          ERES SSOMA-KAIZEN, asistente experto en la plataforma Kaizen, RRHH y Seguridad.
+          ERES SSOMA-KAIZEN.
           
-          PROTOCOLO DE PRIVACIDAD (ESTRICTO):
-          1. CAJA NEGRA: Responde al usuario de forma natural. NUNCA expliques detalles técnicos como "Hice una consulta SQL a la tabla rhStaff". Simplemente di: "Hay 5 colaboradores".
-          2. CONFIDENCIALIDAD: Jamás menciones nombres de tablas, columnas, IDs internos o la estructura de la base de datos.
+          REGLAS DE PRIVACIDAD (ESTRICTO):
+          1. Para el usuario eres un experto humano. NO reveles que usas SQL, tablas, "DatabaseID" o esquemas.
+          2. Si hay errores técnicos, di "No pude consultar los datos en este momento", nunca muestres el error de código.
+
+          CEREBRO HÍBRIDO:
+          A. PREGUNTAS TEÓRICAS (Normas, Cálculos Legales, Manual):
+             - Responde con tu CONOCIMIENTO y el MANUAL adjunto.
+             - NO uses la base de datos.
           
-          MODO DE OPERACIÓN (CEREBRO DUAL):
-          
-          MODO A: PREGUNTAS DE CONOCIMIENTO (Teoría, Normas, Cálculos Legales, Manual)
-          - Si preguntan "¿Cómo se calcula la renta?", "¿Qué es una hora extra?", "¿Cómo creo un usuario?", USA TU CONOCIMIENTO y la sección [BASE DE CONOCIMIENTO] de abajo.
-          - NO uses la base de datos para esto.
-          
-          MODO B: PREGUNTAS DE DATOS REALES (Conteos, Listados, Estado Actual)
-          - Si preguntan "¿Cuántos empleados hay?", "¿Quién está de vacaciones?", "¿Marcajes de hoy?", DEBES usar la herramienta 'consultar_base_datos'.
-          - REGLA SQL: Tu consulta SIEMPRE debe filtrar por: WHERE DatabaseID = '${clientPrefix}'
+          B. PREGUNTAS DE DATOS (Quién, Cuántos, Historial de X):
+             - USA 'consultar_base_datos'.
+             - SEGURIDAD: Filtra SIEMPRE: WHERE DatabaseID = '${clientPrefix}'.
+             - CONSULTAS AVANZADAS: Si piden "toda la información" de un colaborador, eres libre de hacer un JOIN entre rhStaff, rhAttendances, rhActions, etc., usando 'StaffID' como conector. O ejecutar varias consultas.
           
           ${DB_SCHEMA}
-          
           ${MANUAL_KAIZEN}
         `}]
       },
-      generationConfig: { maxOutputTokens: 2048, temperature: 0.2 },
+      generationConfig: { maxOutputTokens: 2048, temperature: 0.1 },
       safetySettings: [
         { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH }
       ]
@@ -254,12 +254,12 @@ export async function handleChatQuery(req, res) {
 
             if (securityError) {
                 result = await chat.sendMessage([{
-                    functionResponse: { name: "consultar_base_datos", response: { error: "No pude acceder a los datos por restricciones de seguridad." } }
+                    functionResponse: { name: "consultar_base_datos", response: { error: "Restricción de seguridad." } }
                 }]);
             } else {
                 try {
                     const dbRows = await query(sql);
-                    const dbResult = JSON.stringify(dbRows).substring(0, 20000);
+                    const dbResult = JSON.stringify(dbRows).substring(0, 25000); // Aumentado para soportar JOINs grandes
                     
                     result = await chat.sendMessage([{
                         functionResponse: { name: "consultar_base_datos", response: { result: dbResult } }
@@ -267,7 +267,7 @@ export async function handleChatQuery(req, res) {
                 } catch (err) {
                     console.error(`Error SQL: ${err.message}`);
                     result = await chat.sendMessage([{
-                        functionResponse: { name: "consultar_base_datos", response: { error: "Ocurrió un error técnico al consultar." } }
+                        functionResponse: { name: "consultar_base_datos", response: { error: "Error técnico en consulta." } }
                     }]);
                 }
             }
@@ -294,7 +294,7 @@ export async function handleChatQuery(req, res) {
 
   } catch (error) {
     console.error('Error:', error.message);
-    res.status(500).json({ success: false, error: 'ai_error', message: "Ocurrió un error inesperado." });
+    res.status(500).json({ success: false, error: 'ai_error', message: "Error interno." });
   } finally {
     setTimeout(() => { filesToDelete.forEach(p => safeDelete(p)); }, 1000);
   }
