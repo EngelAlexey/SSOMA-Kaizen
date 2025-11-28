@@ -90,7 +90,7 @@ export async function registrarHilo(clientPrefix, licenseId, threadId, assistant
     INSERT INTO daChatThread 
     (ctClientPrefix, ctLicenseID, ctThreadID, ctAssistantID, ctCreatedAt)
     VALUES (?, ?, ?, ?, NOW())
-    ON DUPLICATE KEY UPDATE ctID=ctID
+    ON DUPLICATE KEY UPDATE ctUpdatedAt = NOW()
   `;
   await query(sql, [clientPrefix, licenseId, threadId, assistantId]);
 }
@@ -107,15 +107,18 @@ export async function guardarMensaje(threadId, role, content) {
   }
 }
 
-export async function obtenerHistorial(threadId) {
+export async function obtenerHistorial(threadId, clientPrefix) {
   const sql = `
-    SELECT cmRole, cmContent 
-    FROM daChatMessages 
-    WHERE ctThreadID = ? 
-    ORDER BY cmCreatedAt ASC
+    SELECT m.cmRole, m.cmContent 
+    FROM daChatMessages m
+    INNER JOIN daChatThread t ON m.ctThreadID = t.ctThreadID
+    WHERE m.ctThreadID = ? 
+      AND t.ctClientPrefix = ? 
+    ORDER BY m.cmCreatedAt ASC
     LIMIT 40
   `;
-  const rows = await query(sql, [threadId]);
+  
+  const rows = await query(sql, [threadId, clientPrefix]);
   
   return rows.map(r => ({
     role: r.cmRole, 

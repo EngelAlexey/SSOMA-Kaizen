@@ -178,7 +178,7 @@ export async function handleChatQuery(req, res) {
     let history = [];
     if (!isNewThread) {
         try {
-            history = await obtenerHistorial(threadId);
+            history = await obtenerHistorial(threadId, clientPrefix);
         } catch (e) { console.error("Error historial:", e); }
     }
 
