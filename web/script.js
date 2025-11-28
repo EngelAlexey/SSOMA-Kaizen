@@ -1,4 +1,3 @@
-/* Referencias DOM */
 const input = document.getElementById('input');
 const sendBtn = document.getElementById('sendBtn');
 const messagesDiv = document.getElementById('messages');
@@ -10,8 +9,10 @@ const afClose = document.getElementById('afClose');
 const convList = document.getElementById('convList');
 const btnNewChat = document.getElementById('btnNewChat');
 const emptyState = document.getElementById('empty-state');
+const btnMobileMenu = document.getElementById('btnMobileMenu');
+const sidebar = document.getElementById('sidebar');
+const overlay = document.getElementById('overlay');
 
-// Referencias del Modal
 const modalOverlay = document.getElementById('customModal');
 const modalTitle = document.getElementById('modalTitle');
 const modalMessage = document.getElementById('modalMessage');
@@ -21,34 +22,32 @@ const modalBtnCancel = document.getElementById('modalBtnCancel');
 const modalBtnConfirm = document.getElementById('modalBtnConfirm');
 const modalBtnClose = document.getElementById('modalBtnClose');
 
-// Estado
+const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+const API_URL = isLocal ? 'http://127.0.0.1:3000/chat/query' : 'https://ssoma-kaizen-api.onrender.com/chat/query';
+
 let currentFiles = [];
 let sessions = JSON.parse(localStorage.getItem('kaizen_sessions')) || [];
 let activeSessionId = null;
-let modalResolver = null; // Para manejar la promesa del modal
+let modalResolver = null;
 
-// Inicialización
 window.addEventListener('DOMContentLoaded', () => {
   if (sessions.length > 0) {
-    loadSession(sessions[0].id);
+    const lastId = localStorage.getItem('KAIZEN_LAST_CHAT_ID');
+    const targetId = sessions.find(s => s.id === lastId) ? lastId : sessions[0].id;
+    loadSession(targetId);
   } else {
     createNewSession();
   }
   renderHistory();
 });
 
-/* --- SISTEMA DE MODAL (NUEVO) --- */
-
 function showModal({ title, message = '', type = 'confirm', inputValue = '', confirmText = 'Confirmar', danger = false }) {
   return new Promise((resolve) => {
     modalResolver = resolve;
-
-    // Configurar textos
     modalTitle.textContent = title;
     modalMessage.textContent = message;
     modalBtnConfirm.textContent = confirmText;
 
-    // Configurar tipo (Input o Confirmación)
     if (type === 'prompt') {
       modalInputContainer.style.display = 'block';
       modalMessage.style.display = message ? 'block' : 'none';
@@ -58,7 +57,6 @@ function showModal({ title, message = '', type = 'confirm', inputValue = '', con
       modalMessage.style.display = 'block';
     }
 
-    // Configurar estilo del botón (Peligro o Primario)
     if (danger) {
       modalBtnConfirm.classList.remove('primary');
       modalBtnConfirm.classList.add('danger');
@@ -67,15 +65,10 @@ function showModal({ title, message = '', type = 'confirm', inputValue = '', con
       modalBtnConfirm.classList.add('primary');
     }
 
-    // Mostrar
     modalOverlay.classList.add('active');
     
-    // Foco automático
-    if (type === 'prompt') {
-      setTimeout(() => modalInput.focus(), 100);
-    } else {
-      modalBtnConfirm.focus();
-    }
+    if (type === 'prompt') setTimeout(() => modalInput.focus(), 100);
+    else modalBtnConfirm.focus();
   });
 }
 
@@ -87,30 +80,19 @@ function closeModal(result) {
   }
 }
 
-// Eventos del Modal
 modalBtnCancel.onclick = () => closeModal(null);
 modalBtnClose.onclick = () => closeModal(null);
-
 modalBtnConfirm.onclick = () => {
-  if (modalInputContainer.style.display === 'block') {
-    closeModal(modalInput.value); // Retornar texto
-  } else {
-    closeModal(true); // Retornar confirmación
-  }
+  if (modalInputContainer.style.display === 'block') closeModal(modalInput.value);
+  else closeModal(true);
 };
-
 modalInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') modalBtnConfirm.click();
   if (e.key === 'Escape') closeModal(null);
 });
-
-// Cerrar al hacer click fuera del modal
 modalOverlay.addEventListener('mousedown', (e) => {
   if (e.target === modalOverlay) closeModal(null);
 });
-
-
-/* --- GESTIÓN DE SESIONES --- */
 
 function createNewSession() {
   const id = Date.now().toString();
@@ -127,6 +109,7 @@ function createNewSession() {
 
 function loadSession(id) {
   activeSessionId = id;
+  localStorage.setItem('KAIZEN_LAST_CHAT_ID', id);
   const session = sessions.find(s => s.id === id);
   if (!session) return createNewSession();
 
@@ -141,23 +124,21 @@ function loadSession(id) {
   }
 
   renderHistory();
-  messagesDiv.scrollTop = messagesDiv.scrollHeight;
+  sidebar.classList.remove('open');
+  overlay.classList.remove('active');
 }
 
 function saveSessions() {
   localStorage.setItem('kaizen_sessions', JSON.stringify(sessions));
 }
 
-// --- EDICIÓN Y BORRADO CON MODAL ---
-
 async function deleteSession(e, id) {
   e.stopPropagation();
-  
   const confirmed = await showModal({
     title: '¿Eliminar conversación?',
-    message: 'Esta acción no se puede deshacer. Se perderá todo el historial de este chat.',
+    message: 'Se perderá todo el historial de este chat.',
     confirmText: 'Eliminar',
-    danger: true // Botón rojo
+    danger: true
   });
 
   if (!confirmed) return;
@@ -165,13 +146,9 @@ async function deleteSession(e, id) {
   sessions = sessions.filter(s => s.id !== id);
   saveSessions();
 
-  if (sessions.length === 0) {
-    createNewSession();
-  } else if (activeSessionId === id) {
-    loadSession(sessions[0].id);
-  } else {
-    renderHistory();
-  }
+  if (sessions.length === 0) createNewSession();
+  else if (activeSessionId === id) loadSession(sessions[0].id);
+  else renderHistory();
 }
 
 async function renameSession(e, id) {
@@ -181,7 +158,7 @@ async function renameSession(e, id) {
 
   const newTitle = await showModal({
     title: 'Renombrar Chat',
-    type: 'prompt', // Muestra input
+    type: 'prompt',
     inputValue: session.title,
     confirmText: 'Guardar'
   });
@@ -193,11 +170,8 @@ async function renameSession(e, id) {
   }
 }
 
-/* --- UI HISTORIAL --- */
-
 function renderHistory() {
   convList.innerHTML = '';
-  
   sessions.forEach(s => {
     const div = document.createElement('div');
     div.className = `conv-item ${s.id === activeSessionId ? 'active' : ''}`;
@@ -206,49 +180,45 @@ function renderHistory() {
     div.innerHTML = `
       <div class="conv-title" title="${s.title}">${s.title}</div>
       <div class="conv-actions">
-        <button class="action-btn edit" title="Renombrar">
-          <i class="fa-solid fa-pen"></i>
-        </button>
-        <button class="action-btn delete" title="Eliminar">
-          <i class="fa-solid fa-trash"></i>
-        </button>
+        <button class="action-btn edit" title="Renombrar"><i class="fa-solid fa-pen"></i></button>
+        <button class="action-btn delete" title="Eliminar"><i class="fa-solid fa-trash"></i></button>
       </div>
     `;
 
-    const btnEdit = div.querySelector('.edit');
-    const btnDelete = div.querySelector('.delete');
-
-    btnEdit.onclick = (e) => renameSession(e, s.id);
-    btnDelete.onclick = (e) => deleteSession(e, s.id);
-
+    div.querySelector('.edit').onclick = (e) => renameSession(e, s.id);
+    div.querySelector('.delete').onclick = (e) => deleteSession(e, s.id);
     convList.appendChild(div);
   });
 }
 
 btnNewChat.onclick = createNewSession;
-
-/* --- LOGICA DE CHAT Y AUTO-RENOMBRE --- */
+btnMobileMenu.onclick = () => {
+    sidebar.classList.add('open');
+    overlay.classList.add('active');
+};
+overlay.onclick = () => {
+    sidebar.classList.remove('open');
+    overlay.classList.remove('active');
+};
 
 async function sendMessage() {
   const text = input.value.trim();
   if (!text && currentFiles.length === 0) return;
 
   emptyState.style.display = 'none';
-
   const session = sessions.find(s => s.id === activeSessionId);
   
-  // AUTO-RENOMBRE: Solo en el primer mensaje
   if (session && session.messages.length === 0) {
     let autoTitle = text || "Archivo adjunto";
-    if (text.length > 25) autoTitle = text.substring(0, 25) + '...';
+    if (text.length > 30) autoTitle = text.substring(0, 30) + '...';
     session.title = autoTitle;
     renderHistory();
   }
 
   const userMsgObj = { role: 'user', text: text, files: [...currentFiles] };
   session.messages.push(userMsgObj);
-  appendMessageUI('user', text, currentFiles);
   saveSessions();
+  appendMessageUI('user', text, currentFiles);
 
   input.value = '';
   currentFiles = [];
@@ -260,11 +230,11 @@ async function sendMessage() {
   try {
     const payload = {
         text: userMsgObj.text,
-        files: userMsgObj.files,
-        threadId: activeSessionId 
+        threadId: activeSessionId,
+        files: userMsgObj.files 
     };
 
-      const response = await fetch('http://localhost:3000/api/v1/execute', {
+    const response = await fetch(API_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
@@ -284,12 +254,10 @@ async function sendMessage() {
 
   } catch (error) {
     document.getElementById(loadingId)?.remove();
-    appendMessageUI('model', 'Error de conexión.');
+    appendMessageUI('model', 'Error de conexión. Verifica que el servidor esté corriendo.');
     console.error(error);
   }
 }
-
-/* --- UTILIDADES UI --- */
 
 function appendMessageUI(role, text, files = []) {
   const div = document.createElement('div');
@@ -303,9 +271,8 @@ function appendMessageUI(role, text, files = []) {
   }
 
   const htmlContent = marked.parse(text || '');
-
   div.innerHTML = `
-    <div class="avatar">${role === 'user' ? '<i class="fa fa-user"></i>' : '<img src="./assets/Icon App.png" width="24">'}</div>
+    <div class="avatar">${role === 'user' ? '<i class="fa fa-user"></i>' : '<img src="./assets/Kaizen B.png" width="24">'}</div>
     <div class="bubble">
         ${fileHTML}
         <div class="content">${htmlContent}</div>
@@ -320,14 +287,21 @@ function appendLoadingUI(id) {
   div.id = id;
   div.className = 'msg model';
   div.innerHTML = `
-    <div class="avatar"><img src="./assets/Icon App.png" width="24"></div>
-    <div class="bubble"><div class="typing-indicator"><span></span><span></span><span></span></div></div>
+    <div class="avatar">
+        <img src="./assets/Kaizen B.png" width="24" alt="AI">
+    </div>
+    <div class="bubble">
+        <div class="typing-indicator">
+            <span></span>
+            <span></span>
+            <span></span>
+        </div>
+    </div>
   `;
   messagesDiv.appendChild(div);
   messagesDiv.scrollTop = messagesDiv.scrollHeight;
 }
 
-/* --- MANEJO DE ARCHIVOS --- */
 fileInput.addEventListener('change', async (e) => {
   if (e.target.files.length > 0) {
     const file = e.target.files[0];
@@ -355,15 +329,8 @@ function updateAttachFloat() {
   }
 }
 
-afClose.onclick = () => {
-  currentFiles = [];
-  updateAttachFloat();
-};
-
+afClose.onclick = () => { currentFiles = []; updateAttachFloat(); };
 sendBtn.onclick = sendMessage;
 input.addEventListener('keypress', (e) => {
-  if (e.key === 'Enter' && !e.shiftKey) {
-    e.preventDefault();
-    sendMessage();
-  }
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
 });
