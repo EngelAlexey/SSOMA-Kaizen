@@ -1,241 +1,369 @@
-const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-const API_URL = isLocal ? 'http://127.0.0.1:3000/chat/query' : 'https://ssoma-kaizen-api.onrender.com/chat/query'; 
-const LS_KEY = 'KAIZEN_SESSIONS_V6';
+/* Referencias DOM */
+const input = document.getElementById('input');
+const sendBtn = document.getElementById('sendBtn');
+const messagesDiv = document.getElementById('messages');
+const fileInput = document.getElementById('fileInput');
+const attachFloat = document.getElementById('attachFloat');
+const afName = document.getElementById('afName');
+const afSize = document.getElementById('afSize');
+const afClose = document.getElementById('afClose');
+const convList = document.getElementById('convList');
+const btnNewChat = document.getElementById('btnNewChat');
+const emptyState = document.getElementById('empty-state');
 
-const state = { chats: [], currentId: null, files: [] };
+// Referencias del Modal
+const modalOverlay = document.getElementById('customModal');
+const modalTitle = document.getElementById('modalTitle');
+const modalMessage = document.getElementById('modalMessage');
+const modalInputContainer = document.getElementById('modalInputContainer');
+const modalInput = document.getElementById('modalInput');
+const modalBtnCancel = document.getElementById('modalBtnCancel');
+const modalBtnConfirm = document.getElementById('modalBtnConfirm');
+const modalBtnClose = document.getElementById('modalBtnClose');
 
-const dom = {
-    input: document.getElementById('input'),
-    sendBtn: document.getElementById('sendBtn'),
-    messages: document.getElementById('messages'),
-    convList: document.getElementById('convList'),
-    fileInput: document.getElementById('fileInput'),
-    attachFloat: document.getElementById('attachFloat'),
-    afName: document.getElementById('afName'),
-    afSize: document.getElementById('afSize'),
-    afClose: document.getElementById('afClose'),
-    emptyState: document.getElementById('empty-state'),
-    sidebar: document.getElementById('sidebar'),
-    overlay: document.getElementById('overlay'),
-    btnNew: document.getElementById('btnNewChat'),
-    btnMenu: document.getElementById('btnMobileMenu')
-};
+// Estado
+let currentFiles = [];
+let sessions = JSON.parse(localStorage.getItem('kaizen_sessions')) || [];
+let activeSessionId = null;
+let modalResolver = null; // Para manejar la promesa del modal
 
-const app = {
-    init() {
-        this.loadFromStorage();
-        if (state.chats.length === 0) this.createNewChat();
-        else {
-            const lastId = localStorage.getItem('KAIZEN_LAST_CHAT_ID');
-            this.loadChat(state.chats.find(c => c.id === lastId) ? lastId : state.chats[0].id);
-        }
-        this.renderSidebar();
-        this.bindEvents();
-        this.renderFilePreview(); 
-    },
+// Inicialización
+window.addEventListener('DOMContentLoaded', () => {
+  if (sessions.length > 0) {
+    loadSession(sessions[0].id);
+  } else {
+    createNewSession();
+  }
+  renderHistory();
+});
 
-    bindEvents() {
-        if(dom.sendBtn) dom.sendBtn.addEventListener('click', () => this.sendMessage());
-        
-        if(dom.input) {
-            dom.input.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); this.sendMessage(); }
-            });
-            dom.input.addEventListener('input', function() {
-                this.style.height = 'auto'; this.style.height = (this.scrollHeight) + 'px';
-                if(this.value === '') this.style.height = 'auto';
-            });
-        }
+/* --- SISTEMA DE MODAL (NUEVO) --- */
 
-        if(dom.fileInput) {
-            dom.fileInput.addEventListener('change', (e) => {
-                if (e.target.files.length > 0) {
-                    state.files = [...state.files, ...Array.from(e.target.files)];
-                    this.renderFilePreview();
-                }
-                e.target.value = '';
-            });
-        }
-        
-        if(dom.afClose) {
-            dom.afClose.addEventListener('click', () => {
-                state.files = [];
-                this.renderFilePreview();
-            });
-        }
-        
-        if(dom.btnNew) dom.btnNew.addEventListener('click', () => this.createNewChat());
-        if(dom.btnMenu) dom.btnMenu.addEventListener('click', () => this.toggleSidebar());
-        if(dom.overlay) dom.overlay.addEventListener('click', () => this.toggleSidebar(false));
-    },
+function showModal({ title, message = '', type = 'confirm', inputValue = '', confirmText = 'Confirmar', danger = false }) {
+  return new Promise((resolve) => {
+    modalResolver = resolve;
 
-    renderFilePreview() {
-        if (!dom.attachFloat) return; 
-        
-        if (state.files.length > 0) {
-            dom.attachFloat.style.display = 'flex';
-            if(dom.afName) dom.afName.textContent = `${state.files.length} archivo(s)`;
-            if(dom.afSize) {
-                const totalSize = state.files.reduce((acc, f) => acc + f.size, 0);
-                dom.afSize.textContent = (totalSize / 1024).toFixed(1) + ' KB';
-            }
-        } else {
-            dom.attachFloat.style.display = 'none';
-        }
-    },
+    // Configurar textos
+    modalTitle.textContent = title;
+    modalMessage.textContent = message;
+    modalBtnConfirm.textContent = confirmText;
 
-    removeFile(index) {
-        state.files.splice(index, 1);
-        this.renderFilePreview();
-    },
-
-    async sendMessage() {
-        const text = dom.input.value.trim();
-        const files = [...state.files];
-        if (!text && files.length === 0) return;
-
-        if(dom.emptyState) dom.emptyState.style.display = 'none';
-        
-        const filesForHistory = await Promise.all(files.map(async f => {
-            if(f.type.startsWith('image/')) {
-                return { name: f.name, type: f.type, url: await this.fileToBase64(f) };
-            }
-            return { name: f.name, type: f.type };
-        }));
-
-        this.appendMessageUI({ role: 'user', content: text, files: filesForHistory });
-        this.pushMessageToState('user', text, filesForHistory);
-
-        dom.input.value = ''; dom.input.style.height = 'auto';
-        state.files = []; this.renderFilePreview();
-        
-        const loaderId = this.showLoader();
-        dom.sendBtn.disabled = true;
-
-        try {
-            const formData = new FormData();
-            formData.append('text', text);
-            files.forEach(f => formData.append('files', f));
-
-            const res = await fetch(API_URL, { method: 'POST', body: formData });
-            const data = await res.json();
-            this.removeLoader(loaderId);
-
-            if (data.success) {
-                this.appendMessageUI({ role: 'ai', content: data.reply });
-                this.pushMessageToState('ai', data.reply);
-            } else {
-                this.appendMessageUI({ role: 'system', content: data.message || 'Error desconocido' });
-            }
-        } catch (error) {
-            this.removeLoader(loaderId);
-            this.appendMessageUI({ role: 'system', content: `No se pudo conectar con el servidor.` });
-        } finally {
-            dom.sendBtn.disabled = false; dom.input.focus();
-        }
-    },
-
-    fileToBase64(file) {
-        return new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.readAsDataURL(file);
-            reader.onload = () => resolve(reader.result);
-            reader.onerror = error => reject(error);
-        });
-    },
-
-    appendMessageUI(msg) {
-        const div = document.createElement('div');
-        div.className = `msg ${msg.role}`;
-
-        if (msg.role === 'system') {
-            div.innerHTML = `<div class="system-msg">${msg.content}</div>`;
-            dom.messages.appendChild(div);
-            this.scrollToBottom();
-            return;
-        }
-
-        let filesHtml = '';
-        if (msg.files && msg.files.length > 0) {
-            filesHtml = '<div class="msg-files">';
-            msg.files.forEach(f => {
-                if (f.type && f.type.startsWith('image/') && f.url) {
-                    filesHtml += `<img src="${f.url}" class="msg-img" alt="${f.name}">`;
-                } else {
-                    filesHtml += `<div class="file-chip"><i class="fa-solid fa-file"></i> ${f.name}</div>`;
-                }
-            });
-            filesHtml += '</div>';
-        }
-
-        const contentHtml = msg.role === 'ai' ? marked.parse(msg.content) : msg.content.replace(/\n/g, '<br>');
-        const avatar = msg.role === 'ai' ? './assets/Kaizen B.png' : './assets/Icon App.png';
-
-        div.innerHTML = `
-            <div class="avatar ${msg.role}"><img src="${avatar}"></div>
-            <div class="msg-content">
-                <div class="meta">${msg.role === 'ai' ? 'KAIZEN AI' : 'TÚ'}</div>
-                ${filesHtml}
-                <div class="bubble ${msg.role === 'ai' ? 'markdown-body' : ''}">${contentHtml}</div>
-            </div>
-        `;
-
-        dom.messages.appendChild(div);
-        this.scrollToBottom();
-    },
-
-    loadFromStorage() { try { state.chats = JSON.parse(localStorage.getItem(LS_KEY)) || []; } catch(e){ state.chats=[]; } },
-    saveToStorage() { localStorage.setItem(LS_KEY, JSON.stringify(state.chats)); localStorage.setItem('KAIZEN_LAST_CHAT_ID', state.currentId); this.renderSidebar(); },
-    createNewChat() {
-        const newChat = { id: Date.now().toString(), title: 'Nueva Consulta', messages: [], timestamp: Date.now() };
-        state.chats.unshift(newChat); this.saveToStorage(); this.loadChat(newChat.id);
-    },
-    loadChat(id) {
-        state.currentId = id; const chat = state.chats.find(c => c.id === id); if (!chat) return;
-        dom.messages.innerHTML = ''; 
-        if(dom.emptyState) dom.messages.appendChild(dom.emptyState);
-        
-        if (chat.messages.length === 0) {
-            if(dom.emptyState) dom.emptyState.style.display = 'flex';
-        } else {
-            if(dom.emptyState) dom.emptyState.style.display = 'none';
-            chat.messages.forEach(msg => this.appendMessageUI(msg));
-        }
-        this.renderSidebar(); localStorage.setItem('KAIZEN_LAST_CHAT_ID', id);
-    },
-    deleteChat(id, e) {
-        e.stopPropagation(); if(!confirm('¿Borrar chat?')) return;
-        state.chats = state.chats.filter(c => c.id !== id);
-        if(state.chats.length===0) this.createNewChat(); else if(state.currentId===id) this.loadChat(state.chats[0].id);
-        this.saveToStorage();
-    },
-    pushMessageToState(role, content, files) {
-        const chat = state.chats.find(c => c.id === state.currentId);
-        if(chat) { chat.messages.push({ role, content, files, timestamp: Date.now() }); this.saveToStorage(); }
-    },
-    renderSidebar() {
-        if(!dom.convList) return;
-        dom.convList.innerHTML = '';
-        state.chats.forEach(chat => {
-            const el = document.createElement('div');
-            el.className = `conv ${chat.id === state.currentId ? 'active' : ''}`;
-            el.innerHTML = `<div class="t">${chat.title}</div><div class="s">${new Date(chat.timestamp).toLocaleDateString()}</div>`;
-            el.onclick = () => this.loadChat(chat.id);
-            dom.convList.appendChild(el);
-        });
-    },
-    showLoader() {
-        const id = 'ldr'+Date.now();
-        dom.messages.insertAdjacentHTML('beforeend', `<div id="${id}" class="msg ai"><div class="avatar ai"><img src="./assets/Kaizen B.png"></div><div class="bubble typing"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div></div>`);
-        this.scrollToBottom(); return id;
-    },
-    removeLoader(id) { const el = document.getElementById(id); if(el) el.remove(); },
-    scrollToBottom() { dom.messages.scrollTop = dom.messages.scrollHeight; },
-    toggleSidebar(force) { 
-        if(dom.sidebar) dom.sidebar.classList.toggle('open', force); 
-        if(dom.overlay) dom.overlay.classList.toggle('active', force); 
+    // Configurar tipo (Input o Confirmación)
+    if (type === 'prompt') {
+      modalInputContainer.style.display = 'block';
+      modalMessage.style.display = message ? 'block' : 'none';
+      modalInput.value = inputValue;
+    } else {
+      modalInputContainer.style.display = 'none';
+      modalMessage.style.display = 'block';
     }
+
+    // Configurar estilo del botón (Peligro o Primario)
+    if (danger) {
+      modalBtnConfirm.classList.remove('primary');
+      modalBtnConfirm.classList.add('danger');
+    } else {
+      modalBtnConfirm.classList.remove('danger');
+      modalBtnConfirm.classList.add('primary');
+    }
+
+    // Mostrar
+    modalOverlay.classList.add('active');
+    
+    // Foco automático
+    if (type === 'prompt') {
+      setTimeout(() => modalInput.focus(), 100);
+    } else {
+      modalBtnConfirm.focus();
+    }
+  });
+}
+
+function closeModal(result) {
+  modalOverlay.classList.remove('active');
+  if (modalResolver) {
+    modalResolver(result);
+    modalResolver = null;
+  }
+}
+
+// Eventos del Modal
+modalBtnCancel.onclick = () => closeModal(null);
+modalBtnClose.onclick = () => closeModal(null);
+
+modalBtnConfirm.onclick = () => {
+  if (modalInputContainer.style.display === 'block') {
+    closeModal(modalInput.value); // Retornar texto
+  } else {
+    closeModal(true); // Retornar confirmación
+  }
 };
 
-window.app = app;
-document.addEventListener('DOMContentLoaded', () => app.init());
+modalInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') modalBtnConfirm.click();
+  if (e.key === 'Escape') closeModal(null);
+});
+
+// Cerrar al hacer click fuera del modal
+modalOverlay.addEventListener('mousedown', (e) => {
+  if (e.target === modalOverlay) closeModal(null);
+});
+
+
+/* --- GESTIÓN DE SESIONES --- */
+
+function createNewSession() {
+  const id = Date.now().toString();
+  const newSession = {
+    id,
+    title: 'Nuevo Chat',
+    messages: [],
+    timestamp: Date.now()
+  };
+  sessions.unshift(newSession);
+  saveSessions();
+  loadSession(id);
+}
+
+function loadSession(id) {
+  activeSessionId = id;
+  const session = sessions.find(s => s.id === id);
+  if (!session) return createNewSession();
+
+  messagesDiv.innerHTML = '';
+  messagesDiv.appendChild(emptyState);
+
+  if (session.messages.length === 0) {
+    emptyState.style.display = 'flex';
+  } else {
+    emptyState.style.display = 'none';
+    session.messages.forEach(msg => appendMessageUI(msg.role, msg.text, msg.files));
+  }
+
+  renderHistory();
+  messagesDiv.scrollTop = messagesDiv.scrollHeight;
+}
+
+function saveSessions() {
+  localStorage.setItem('kaizen_sessions', JSON.stringify(sessions));
+}
+
+// --- EDICIÓN Y BORRADO CON MODAL ---
+
+async function deleteSession(e, id) {
+  e.stopPropagation();
+  
+  const confirmed = await showModal({
+    title: '¿Eliminar conversación?',
+    message: 'Esta acción no se puede deshacer. Se perderá todo el historial de este chat.',
+    confirmText: 'Eliminar',
+    danger: true // Botón rojo
+  });
+
+  if (!confirmed) return;
+
+  sessions = sessions.filter(s => s.id !== id);
+  saveSessions();
+
+  if (sessions.length === 0) {
+    createNewSession();
+  } else if (activeSessionId === id) {
+    loadSession(sessions[0].id);
+  } else {
+    renderHistory();
+  }
+}
+
+async function renameSession(e, id) {
+  e.stopPropagation();
+  const session = sessions.find(s => s.id === id);
+  if (!session) return;
+
+  const newTitle = await showModal({
+    title: 'Renombrar Chat',
+    type: 'prompt', // Muestra input
+    inputValue: session.title,
+    confirmText: 'Guardar'
+  });
+
+  if (newTitle && newTitle.trim() !== '') {
+    session.title = newTitle.trim();
+    saveSessions();
+    renderHistory();
+  }
+}
+
+/* --- UI HISTORIAL --- */
+
+function renderHistory() {
+  convList.innerHTML = '';
+  
+  sessions.forEach(s => {
+    const div = document.createElement('div');
+    div.className = `conv-item ${s.id === activeSessionId ? 'active' : ''}`;
+    div.onclick = () => loadSession(s.id);
+
+    div.innerHTML = `
+      <div class="conv-title" title="${s.title}">${s.title}</div>
+      <div class="conv-actions">
+        <button class="action-btn edit" title="Renombrar">
+          <i class="fa-solid fa-pen"></i>
+        </button>
+        <button class="action-btn delete" title="Eliminar">
+          <i class="fa-solid fa-trash"></i>
+        </button>
+      </div>
+    `;
+
+    const btnEdit = div.querySelector('.edit');
+    const btnDelete = div.querySelector('.delete');
+
+    btnEdit.onclick = (e) => renameSession(e, s.id);
+    btnDelete.onclick = (e) => deleteSession(e, s.id);
+
+    convList.appendChild(div);
+  });
+}
+
+btnNewChat.onclick = createNewSession;
+
+/* --- LOGICA DE CHAT Y AUTO-RENOMBRE --- */
+
+async function sendMessage() {
+  const text = input.value.trim();
+  if (!text && currentFiles.length === 0) return;
+
+  emptyState.style.display = 'none';
+
+  const session = sessions.find(s => s.id === activeSessionId);
+  
+  // AUTO-RENOMBRE: Solo en el primer mensaje
+  if (session && session.messages.length === 0) {
+    let autoTitle = text || "Archivo adjunto";
+    if (text.length > 25) autoTitle = text.substring(0, 25) + '...';
+    session.title = autoTitle;
+    renderHistory();
+  }
+
+  const userMsgObj = { role: 'user', text: text, files: [...currentFiles] };
+  session.messages.push(userMsgObj);
+  appendMessageUI('user', text, currentFiles);
+  saveSessions();
+
+  input.value = '';
+  currentFiles = [];
+  updateAttachFloat();
+
+  const loadingId = 'loading-' + Date.now();
+  appendLoadingUI(loadingId);
+
+  try {
+    const payload = {
+        text: userMsgObj.text,
+        files: userMsgObj.files,
+        threadId: activeSessionId 
+    };
+
+    const response = await fetch('http://localhost:3000/chat/query', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    const data = await response.json();
+    document.getElementById(loadingId)?.remove();
+
+    if (data.success) {
+        const aiMsgObj = { role: 'model', text: data.reply, files: [] };
+        session.messages.push(aiMsgObj);
+        saveSessions();
+        appendMessageUI('model', data.reply);
+    } else {
+        appendMessageUI('model', 'Error: ' + (data.error || 'No se pudo conectar.'));
+    }
+
+  } catch (error) {
+    document.getElementById(loadingId)?.remove();
+    appendMessageUI('model', 'Error de conexión.');
+    console.error(error);
+  }
+}
+
+/* --- UTILIDADES UI --- */
+
+function appendMessageUI(role, text, files = []) {
+  const div = document.createElement('div');
+  div.className = `msg ${role}`;
+  
+  let fileHTML = '';
+  if (files && files.length > 0) {
+    fileHTML = `<div class="msg-files">
+      ${files.map(f => `<div class="file-chip"><i class="fa fa-file"></i> ${f.filename || 'Archivo'}</div>`).join('')}
+    </div>`;
+  }
+
+  const htmlContent = marked.parse(text || '');
+
+  div.innerHTML = `
+    <div class="avatar">${role === 'user' ? '<i class="fa fa-user"></i>' : '<img src="./assets/Icon App.png" width="24">'}</div>
+    <div class="bubble">
+        ${fileHTML}
+        <div class="content">${htmlContent}</div>
+    </div>
+  `;
+  messagesDiv.appendChild(div);
+  messagesDiv.scrollTop = messagesDiv.scrollHeight;
+}
+
+function appendLoadingUI(id) {
+  const div = document.createElement('div');
+  div.id = id;
+  div.className = 'msg model';
+  div.innerHTML = `
+    <div class="avatar"><img src="./assets/Icon App.png" width="24"></div>
+    <div class="bubble"><div class="typing-indicator"><span></span><span></span><span></span></div></div>
+  `;
+  messagesDiv.appendChild(div);
+  messagesDiv.scrollTop = messagesDiv.scrollHeight;
+}
+
+/* --- MANEJO DE ARCHIVOS --- */
+fileInput.addEventListener('change', async (e) => {
+  if (e.target.files.length > 0) {
+    const file = e.target.files[0];
+    const reader = new FileReader();
+    reader.onload = function(evt) {
+        currentFiles = [{
+            filename: file.name,
+            mimetype: file.type,
+            base64: evt.target.result.split(',')[1]
+        }];
+        updateAttachFloat();
+    };
+    reader.readAsDataURL(file);
+  }
+});
+
+function updateAttachFloat() {
+  if (currentFiles.length > 0) {
+    attachFloat.style.display = 'flex';
+    afName.textContent = currentFiles[0].filename;
+    afSize.textContent = 'Adjunto';
+  } else {
+    attachFloat.style.display = 'none';
+    fileInput.value = '';
+  }
+}
+
+afClose.onclick = () => {
+  currentFiles = [];
+  updateAttachFloat();
+};
+
+sendBtn.onclick = sendMessage;
+input.addEventListener('keypress', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendMessage();
+  }
+});

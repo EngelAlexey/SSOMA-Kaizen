@@ -106,6 +106,26 @@
   <!-- Overlay Móvil -->
   <div id="overlay" class="overlay"></div>
 
+  <div id="customModal" class="modal-overlay">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3 id="modalTitle">Título</h3>
+        <button class="btn-close-modal" id="modalBtnClose"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      
+      <p id="modalMessage">Mensaje de confirmación</p>
+      
+      <div id="modalInputContainer" style="display: none;">
+        <input type="text" id="modalInput" class="modal-input" autocomplete="off" spellcheck="false">
+      </div>
+
+      <div class="modal-actions">
+        <button id="modalBtnCancel" class="modal-btn secondary">Cancelar</button>
+        <button id="modalBtnConfirm" class="modal-btn primary">Confirmar</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Lógica -->
   <script src="script.js"></script>
 </body>
