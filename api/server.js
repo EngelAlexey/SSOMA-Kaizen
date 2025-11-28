@@ -71,7 +71,7 @@ app.get('/', (req, res) => {
   });
 });
 
-app.post('/api/v1/execute', upload.array('files'), handleChatQuery);
+app.post('/chat/query', upload.array('files'), handleChatQuery);
 
 app.use((err, req, res, next) => {
   console.error('🔥 Error:', err.message);

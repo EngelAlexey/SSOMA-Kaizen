@@ -10,37 +10,33 @@ import { validarLicencia, registrarHilo, query } from '../db.js';
 const LICENCIA_DEV = 'KZN-DFA8-A9C5-BE6D-11F0';
 
 const DB_SCHEMA = `
-INSTRUCCIONES TÉCNICAS SQL (USO EXCLUSIVO INTERNO):
-- Entorno: Multi-Tenant.
-- FILTRO OBLIGATORIO: 'DatabaseID' en el WHERE de CADA tabla consultada.
-- RELACIONES (JOINS): La columna 'StaffID' es la clave única que conecta 'rhStaff' con todas las demás tablas.
+INSTRUCCIONES TÉCNICAS SQL (USO INTERNO):
+1. ENTORNO: MySQL/MariaDB Multi-Tenant.
+2. FILTRO OBLIGATORIO: 'WHERE DatabaseID = ...' en CADA tabla.
+3. JOINS: Usa 'StaffID' para unir tablas.
 
-TABLAS Y COLUMNAS:
+MANEJO DE FECHAS (CRÍTICO):
+- Las columnas de fecha son tipo DATETIME o DATE.
+- PARA FILTRAR POR FECHA ESPECÍFICA: Usa la función DATE().
+  - CORRECTO: WHERE DATE(ckTimestamp) = '2023-11-28'
+- PARA "HOY": Usa CURDATE(). Ej: WHERE atDate = CURDATE()
+- PARA RANGOS: WHERE atDate BETWEEN '2023-01-01' AND '2023-01-31'
 
-1. rhStaff (Maestra de Personal):
-   - PK: StaffID
-   - Columnas: DatabaseID, StaffID, stCode (Código), stName, stFirstsurname, stSecondsurname, stStatus (1=Activo), stEmail, stPhone, stIncome (Fecha Ingreso), JobpositionID.
-
+TABLAS:
+1. rhStaff (Personal):
+   - DatabaseID, StaffID, stName, stFirstsurname, stStatus (1=Activo).
 2. rhAttendances (Asistencias):
-   - FK: StaffID
-   - Columnas: DatabaseID, AttendanceID, atDate, StaffID, atHours, atEntrance, atDeparture.
-
-3. rhActions (Historial de Acciones/RRHH):
-   - FK: StaffID
-   - Columnas: DatabaseID, ActionID, StaffID, acDate, acType (Ej: 'Vacaciones', 'Incapacidad', 'Amonestación'), StartDate, EndDate, acStatus.
-
-4. rhAdjustments (Ajustes Salariales/Bonos):
-   - FK: StaffID
-   - Columnas: DatabaseID, AdjustmentID, StaffID, adDate, adType, adAmount, adObservations.
-
-5. rhClockV (Marcas Crudas de Reloj):
-   - FK: StaffID
-   - Columnas: DatabaseID, ClockID, StaffID, ckTimestamp, ckType, ckLocation.
+   - DatabaseID, AttendanceID, atDate (YYYY-MM-DD), StaffID, atHours, atEntrance, atDeparture.
+3. rhClockV (Marcas Reloj):
+   - DatabaseID, ClockID, StaffID, ckTimestamp (YYYY-MM-DD HH:MM:SS), ckType.
+4. rhActions (Acciones):
+   - DatabaseID, ActionID, StaffID, acDate, acType.
+5. rhAdjustments (Ajustes):
+   - DatabaseID, AdjustmentID, StaffID, adDate, adType, adAmount.
 `;
 
 const MANUAL_KAIZEN = `
-[BASE DE CONOCIMIENTO - NO USAR SQL PARA ESTO]
-
+[BASE DE CONOCIMIENTO]
 1. USO DE APP KAIZEN:
    - PERMISOS: Inicio > Permisos.
    - USUARIOS: Login con Google.
@@ -88,13 +84,13 @@ const tools = [
     functionDeclarations: [
       {
         name: "consultar_base_datos",
-        description: "Ejecuta SQL SELECT. Úsala para obtener datos puntuales, listas o perfiles completos de colaboradores uniendo tablas.",
+        description: "Ejecuta SQL SELECT. Úsala para preguntas sobre datos (quién, cuántos, fechas, hoy).",
         parameters: {
           type: "OBJECT",
           properties: {
             sql_query: {
               type: "STRING",
-              description: "Consulta SQL SELECT. Soporta JOINs. Debe incluir 'WHERE DatabaseID = ...'"
+              description: "SQL SELECT válido para MySQL. Recuerda filtrar por DatabaseID y usar DATE() para columnas de tiempo."
             }
           },
           required: ["sql_query"]
@@ -181,19 +177,19 @@ export async function handleChatQuery(req, res) {
         parts: [{ text: `
           ERES SSOMA-KAIZEN.
           
-          REGLAS DE PRIVACIDAD (ESTRICTO):
+          REGLAS DE PRIVACIDAD:
           1. Para el usuario eres un experto humano. NO reveles que usas SQL, tablas, "DatabaseID" o esquemas.
           2. Si hay errores técnicos, di "No pude consultar los datos en este momento", nunca muestres el error de código.
 
           CEREBRO HÍBRIDO:
-          A. PREGUNTAS TEÓRICAS (Normas, Cálculos Legales, Manual):
+          A. PREGUNTAS TEÓRICAS:
              - Responde con tu CONOCIMIENTO y el MANUAL adjunto.
              - NO uses la base de datos.
           
-          B. PREGUNTAS DE DATOS (Quién, Cuántos, Historial de X):
+          B. PREGUNTAS DE DATOS:
              - USA 'consultar_base_datos'.
              - SEGURIDAD: Filtra SIEMPRE: WHERE DatabaseID = '${clientPrefix}'.
-             - CONSULTAS AVANZADAS: Si piden "toda la información" de un colaborador, eres libre de hacer un JOIN entre rhStaff, rhAttendances, rhActions, etc., usando 'StaffID' como conector. O ejecutar varias consultas.
+             - FECHAS: Usa CURDATE() para 'hoy'.
           
           ${DB_SCHEMA}
           ${MANUAL_KAIZEN}
@@ -229,8 +225,6 @@ export async function handleChatQuery(req, res) {
     let result = await chat.sendMessage(parts);
     let response = await result.response;
     
-    // --- LÓGICA CORREGIDA PARA MANEJAR MÚLTIPLES LLAMADAS EN PARALELO ---
-    
     let functionCalls = [];
     if (response.candidates?.[0]?.content?.parts) {
         functionCalls = response.candidates[0].content.parts
@@ -239,10 +233,8 @@ export async function handleChatQuery(req, res) {
     }
 
     while (functionCalls.length > 0) {
-        // Array para acumular TODAS las respuestas de este turno
         const responses = [];
 
-        // Procesamos todas las llamadas de función solicitadas por el modelo
         for (const call of functionCalls) {
             if (call.name === "consultar_base_datos") {
                 const sql = call.args.sql_query || "";
@@ -264,7 +256,6 @@ export async function handleChatQuery(req, res) {
                 } else {
                     try {
                         const dbRows = await query(sql);
-                        // Limitamos el tamaño para no desbordar el contexto de la IA
                         queryResult = { result: JSON.stringify(dbRows).substring(0, 25000) };
                     } catch (err) {
                         console.error(`Error SQL: ${err.message}`);
@@ -272,7 +263,6 @@ export async function handleChatQuery(req, res) {
                     }
                 }
 
-                // Agregamos la respuesta al array (NO enviamos todavía)
                 responses.push({
                     functionResponse: {
                         name: "consultar_base_datos",
@@ -282,13 +272,11 @@ export async function handleChatQuery(req, res) {
             }
         }
 
-        // Enviamos TODAS las respuestas juntas de vuelta al modelo
         if (responses.length > 0) {
             result = await chat.sendMessage(responses);
             response = await result.response;
         }
 
-        // Verificamos si el modelo quiere llamar a más funciones en el siguiente turno
         functionCalls = [];
         if (response.candidates?.[0]?.content?.parts) {
             functionCalls = response.candidates[0].content.parts
