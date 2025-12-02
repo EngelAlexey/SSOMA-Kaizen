@@ -6,12 +6,12 @@ export class SystemKnowledgeBase {
             'daDashboard'
         ]);
 
-        this.intentTableMap = {
-            'PROJECTS': ['drProjects', 'rhStaff'],
+        this.topicTableMap = {
             'ATTENDANCE': ['rhAttendances', 'rhStaff', 'rhClockV'],
-            'STAFF_COUNT': ['rhStaff'],
-            'FINDINGS': ['soFindings', 'rhStaff'],
-            'GENERAL': ['rhStaff']
+            'STAFF': ['rhStaff', 'rhJobpositions'],
+            'PROJECTS': ['drProjects', 'rhStaff'],
+            'SSOMA': ['soFindings', 'soAccidents', 'rhStaff'],
+            'GENERAL': ['rhStaff'] 
         };
         
         this.publicSchemaMetadata = {
@@ -68,28 +68,19 @@ export class SystemKnowledgeBase {
         return this.schemaContext;
     }
 
-    // NUEVO: Método para obtener solo el contexto de las tablas necesarias para la IA
-    getSchemaForIntent(intentType) {
-        const mapKey = intentType.replace('_INDIVIDUAL', '').replace('_COUNT', '');
-        const tableNames = this.intentTableMap[mapKey] || this.intentTableMap['GENERAL'];
-
-        if (!tableNames || tableNames.length === 0) {
-             return "ADVERTENCIA: No se pudo identificar la intención. Usar solo tablas generales (rhStaff).";
-        }
+    getSchemaForTopic(topic) {
+        const tableNames = this.topicTableMap[topic] || this.topicTableMap['GENERAL'];
         
-        let relevantContext = "INSTRUCCIONES TÉCNICAS SQL (USO INTERNO):\n- Filtro OBLIGATORIO: 'WHERE DatabaseID = ...' en todas las tablas.\n- Relación: 'StaffID' conecta la mayoría de las tablas de RH/SSOMA.\n\nTABLAS REQUERIDAS:\n";
+        let relevantContext = "INSTRUCCIONES TÉCNICAS SQL (USO INTERNO):\n- Filtro OBLIGATORIO: 'WHERE DatabaseID = ...' en todas las tablas.\n- Relación: 'StaffID' conecta tablas.\n- REGLA GLOBAL: stStatus = 1 para activos.\n\nTABLAS REQUERIDAS:\n";
         
         const tableContextLines = this.schemaContext.split('\n');
-        
         for (const tableName of tableNames) {
             const line = tableContextLines.find(line => line.trim().startsWith(tableName + ' '));
-            if (line) {
-                relevantContext += line.trim() + '\n';
-            }
+            if (line) relevantContext += line.trim() + '\n';
         }
-
         return relevantContext.trim();
     }
+        
 
     isTableAccessible(tableName) {
         if (this.internalTables.has(tableName) || tableName.startsWith('da')) return false;
@@ -102,34 +93,19 @@ export class SystemKnowledgeBase {
 }
 
 export class QueryBuilder {
-    constructor(knowledgeBase) {
-        this.kb = knowledgeBase;
-    }
+    constructor(knowledgeBase) { this.kb = knowledgeBase; }
 
     validateSecurity(sql, clientDatabaseId) {
         const upperSql = sql.toUpperCase();
         const forbidden = ['INSERT', 'UPDATE', 'DELETE', 'DROP', 'ALTER', 'TRUNCATE', 'GRANT', 'REVOKE'];
-        if (forbidden.some(word => upperSql.includes(word))) {
-            throw new Error("Security Alert: Solo se permiten consultas de lectura (SELECT).");
-        }
-
-        const internalTables = Array.from(this.kb.internalTables);
-        if (internalTables.some(table => upperSql.includes(table.toUpperCase()))) {
-            throw new Error("Security Alert: Intento de acceso a tablas de sistema.");
-        }
-
-        if (!upperSql.includes(clientDatabaseId.toUpperCase())) {
-            console.warn(`⚠️ Advertencia de Seguridad: El SQL generado no parece filtrar explícitamente por DatabaseID '${clientDatabaseId}'.`);
-        }
-
+        if (forbidden.some(word => upperSql.includes(word))) throw new Error("Security Alert: Solo SELECT permitido.");
+        if (!upperSql.includes(clientDatabaseId.toUpperCase())) console.warn(`⚠️ Advertencia: SQL sin filtro explícito DatabaseID.`);
         return sql;
     }
 }
 
 export class TranslationLayer {
-    constructor() {
-        this.columnDictionary = {};
-    }
+    constructor() { this.columnDictionary = {}; }
     loadDictionary(data) { this.columnDictionary = { ...this.columnDictionary, ...data }; }
 }
 

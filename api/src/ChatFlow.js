@@ -1,44 +1,49 @@
+import fs from 'fs';
 import { query } from './db.js';
 import { sqlEngine, kb, translator } from './CoreSystem.js';
+import { manualIndex } from './KnowledgeIndex.js'; // Importamos el nuevo índice
+import { updateThreadState, getThreadState } from '../sessions.js';
 
 const AI_API_KEY = process.env.AI_API_KEY || ''; 
 const AI_ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-001:generateContent';
 
-// Función para limpiar el mensaje de ruido antes de generar SQL
 function cleanMessage(text) {
     const greetings = /^(hola|buenos días|buenas noches|qué tal|buenas|saludos|disculpa|por favor|te pido|quiero saber|dame la lista de)\W*/i;
     let cleanedText = text.replace(greetings, '').trim();
-    
-    // Si la limpieza deja el mensaje vacío, usamos el original
     if (cleanedText.length === 0) return text;
     return cleanedText;
 }
 
 class LLMService {
-    async callAI(messages, temperature = 0) {
+    async callAI(messages, temperature = 0, files = []) {
         if (!AI_API_KEY) {
-            console.warn("⚠️ AI_API_KEY no detectada. Cambiando a Motor de Inferencia Local.");
+            console.warn("⚠️ AI_API_KEY no detectada.");
             return null; 
         }
 
         const systemMessage = messages.find(m => m.role === 'system');
         const userMessage = messages.find(m => m.role === 'user');
+        const userContentParts = [{ text: userMessage.content }];
+
+        if (files && files.length > 0) {
+            for (const file of files) {
+                try {
+                    const fileBuffer = fs.readFileSync(file.path);
+                    const base64Data = fileBuffer.toString('base64');
+                    userContentParts.push({ inlineData: { mimeType: file.mimetype, data: base64Data } });
+                } catch (e) {
+                    console.error(`Error archivo: ${file.path}`, e);
+                }
+            }
+        }
 
         const payload = {
-            contents: [{
-                role: 'user',
-                parts: [{ text: userMessage.content }]
-            }],
-            generationConfig: {
-                temperature: temperature,
-                maxOutputTokens: 2000
-            }
+            contents: [{ role: 'user', parts: userContentParts }],
+            generationConfig: { temperature: temperature, maxOutputTokens: 2000 }
         };
 
         if (systemMessage) {
-            payload.systemInstruction = {
-                parts: [{ text: systemMessage.content }]
-            };
+            payload.systemInstruction = { parts: [{ text: systemMessage.content }] };
         }
 
         try {
@@ -48,75 +53,54 @@ class LLMService {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload)
             });
-
             const data = await response.json();
             if (data.error) throw new Error(data.error.message);
             return data.candidates?.[0]?.content?.parts?.[0]?.text || "";
         } catch (error) {
-            console.error("Error conectando con Gemini:", error.message);
+            console.error("Gemini Error:", error.message);
             return null; 
         }
     }
 }
 
 class LocalInferenceEngine {
-    detectIntent(text) {
+    analyzeRequest(text) {
         const lower = text.toLowerCase();
         
-        const isProject = lower.includes('proyect') || lower.includes('obra') || lower.includes('construc');
-        const isAttendance = lower.includes('asist') || lower.includes('entr') || lower.includes('marcA') || lower.includes('hora') || lower.includes('lleg');
-        const isCount = lower.includes('cuant') || lower.includes('total') || lower.includes('resumen');
+        // 1. DETECCIÓN DE TEMA (Topic)
+        let topic = 'GENERAL';
+        if (lower.includes('asist') || lower.includes('entr') || lower.includes('reloj') || lower.includes('marcas')) topic = 'ATTENDANCE';
+        else if (lower.includes('person') || lower.includes('emplead') || lower.includes('colaborador') || lower.includes('usuario')) topic = 'STAFF';
+        else if (lower.includes('proyect') || lower.includes('obra')) topic = 'PROJECTS';
+        else if (lower.includes('seguridad') || lower.includes('acto') || lower.includes('riesgo') || lower.includes('epp')) topic = 'SSOMA';
+
+        // 2. DETECCIÓN DE MODO (Data vs Manual)
+        // Palabras que indican consulta de base de datos
+        const dataKeywords = ['cuant', 'quien', 'lista', 'nombre', 'dame', 'mostrar', 'ver', 'cuales', 'hay'];
+        // Palabras que indican consulta de manual/procedimiento
+        const manualKeywords = ['como', 'pasos', 'registrar', 'crear', 'hago', 'donde', 'instrucciones', 'guia'];
+
+        let mode = 'NARRATIVE'; // Por defecto
         
-        const isDataQuery = isCount || lower.includes('quien') || lower.includes('lista') || lower.includes('nombre');
-        const isProcedureQuery = lower.includes('como se') || lower.includes('como puedo') || lower.includes('pasos') || lower.includes('registrar');
-        
-        let entity = null;
-        if (isDataQuery) { 
-            const commonWords = ['a', 'que', 'hora', 'dime', 'el', 'la', 'de', 'hoy', 'entro', 'marco', 'marcaron', 'personas', 'cuantas', 'quienes', 'el', 'la', 'los', 'las', 'un', 'una'];
-            const words = lower.split(' ').filter(w => !commonWords.includes(w) && w.length > 2);
-            if (words.length > 0 && !lower.includes('proyectos') && !lower.includes('activos')) {
-                entity = words.join(' ');
-            }
+        // Si tiene palabras de datos, es SQL
+        if (dataKeywords.some(kw => lower.includes(kw))) {
+            mode = 'SQL';
+        }
+        // Si tiene palabras de manual explícitas, fuerza NARRATIVE (manual)
+        // Esto sobreescribe si hay conflicto (ej: "Como veo la lista" -> Manual sobre cómo ver listas)
+        if (manualKeywords.some(kw => lower.includes(kw))) {
+            mode = 'MANUAL'; 
         }
 
-        if (isProject && isDataQuery) return { type: 'PROJECTS', entity };
-        if (isAttendance && isDataQuery) return { type: 'ATTENDANCE', entity };
-        if (isDataQuery) return { type: 'STAFF_COUNT', entity };
-
-        if (isAttendance && isProcedureQuery) return { type: 'PROCEDURE_ATTENDANCE', entity };
-        
-        return { type: 'UNKNOWN' };
+        return { topic, mode };
     }
 
     generateSQL(intent, context) {
-        switch (intent.type) {
-            case 'PROJECTS':
-                return sqlEngine.getActiveProjectsStrategy(context.databaseId);
-            case 'ATTENDANCE': 
-            case 'ATTENDANCE_INDIVIDUAL':
-                return sqlEngine.getEntranceLogStrategy(intent.entity, context.databaseId);
-            case 'STAFF_COUNT':
-                return sqlEngine.countDailyMarksStrategy(context.databaseId);
-            default:
-                return null;
-        }
+        // Fallback local simple
+        return sqlEngine.validateSecurity("SELECT * FROM rhStaff", context.databaseId); 
     }
 
     formatResponse(intent, rows) {
-        if (!rows || rows.length === 0) return "No encontré registros que coincidan con tu búsqueda en la base de datos.";
-
-        if (intent.type === 'PROJECTS') {
-            const list = rows.map(p => `- ${p.pjTitle || 'Sin Título'} (${p.pjCode || 'S/C'})`).join('\n');
-            return `🏗️ **Proyectos Activos Encontrados:**\n${list}`;
-        }
-        if (intent.type === 'ATTENDANCE_INDIVIDUAL') {
-            const r = rows[0];
-            const time = new Date(r.ckTimestamp).toLocaleTimeString();
-            return `✅ **${r.stName}** registró su entrada hoy a las **${time}**.\n(Tipo: ${r.ckType})`;
-        }
-        if (intent.type === 'ATTENDANCE' || intent.type === 'STAFF_COUNT') {
-             return `📊 **Reporte de Asistencia:**\nHoy se han registrado un total de **${rows[0].total}** colaboradores.`;
-        }
         return JSON.stringify(rows);
     }
 }
@@ -125,121 +109,118 @@ export class ChatOrchestrator {
     constructor() {
         this.ai = new LLMService();
         this.localEngine = new LocalInferenceEngine();
-        
-        translator.loadDictionary({
-            'stName': 'Colaborador',
-            'ckTimestamp': 'Hora',
-            'pjTitle': 'Proyecto',
-            'pjCode': 'Código'
-        });
+        translator.loadDictionary({ 'stName': 'Colaborador', 'ckTimestamp': 'Hora' });
     }
 
     async handleUserMessage(userMessage, context) {
         try {
-            const intent = this.localEngine.detectIntent(userMessage);
-
-            const requiresSql = intent.type !== 'UNKNOWN' && !intent.type.startsWith('PROCEDURE_');
+            const threadId = context.threadId;
+            const inputFiles = context.files || [];
+            const previousData = getThreadState(threadId, 'lastQueryResult');
+            
+            // Análisis inteligente de la solicitud
+            const { topic, mode } = this.localEngine.analyzeRequest(userMessage);
+            
+            // Decisión final de si ejecutar SQL (Si modo es SQL y no hay archivos)
+            let executeSql = (mode === 'SQL') && (inputFiles.length === 0);
 
             let systemContent = "";
             let userPrompt = userMessage; 
 
-            if (requiresSql) {
-                const dynamicSchema = kb.getSchemaForIntent(intent.type);
+            // --- CASO 1: VISIÓN (Prioridad Máxima si hay archivos) ---
+            if (inputFiles.length > 0) {
+                executeSql = false;
+                systemContent = `
+IDENTIDAD: Auditor experto SSOMA de Kaizen.
+TAREA: Analiza la imagen.
+REGLAS: Solo reporta lo visible. Identifica EPP y riesgos.
+`;
+            
+            // --- CASO 2: MEMORIA / SEGUIMIENTO ---
+            } else if (previousData && (userMessage.toLowerCase().includes('mayor') || userMessage.toLowerCase().includes('menor') || userMessage.toLowerCase().includes('edad') || userMessage.toLowerCase().includes('cuál') || userMessage.toLowerCase().includes('correo'))) {
+                executeSql = false;
+                systemContent = `
+IDENTIDAD: KaizenGPT.
+TAREA: Responde usando SOLO este JSON recuperado previamente.
+DATOS: ${previousData}
+REGLAS: 'stBirthdate' es fecha nacimiento.
+`;
                 
-                // Aplicar limpieza para que la IA solo vea la intención pura
+            // --- CASO 3: CONSULTA SQL (DATA) ---
+            } else if (executeSql) {
+                const dynamicSchema = kb.getSchemaForTopic(topic); // Obtenemos esquema del TEMA detectado
                 const cleanedMessage = cleanMessage(userMessage);
                 
                 systemContent = `
-IDENTIDAD: Eres KaizenGPT. Tu única TAREA es generar una consulta SQL de MySQL que cumpla estrictamente con la pregunta del usuario.
-PERSONALIDAD: Eres silencioso, preciso y técnico. Tu única salida debe ser el código.
-
-========================================================
-| ESQUEMA DE DATOS CRÍTICO PARA GENERACIÓN DE SQL (SELECT)
-========================================================
-${dynamicSchema}
-
+IDENTIDAD: KaizenGPT. Generador SQL MySQL.
+ESQUEMA: ${dynamicSchema}
 CLIENTE: '${context.databaseId}'
-
-REGLAS DE SEGURIDAD (OBLIGATORIAS): 
-- NUNCA uses tablas o columnas fuera del esquema provisto.
-- Filtra estrictamente por WHERE DatabaseID='${context.databaseId}'.
-- Solo se permite SELECT.
-- Si no puedes generar un SELECT que cumpla con el requerimiento, la SALIDA debe ser un mensaje de error claro, NO un saludo o texto conversacional.
-
-SALIDA REQUERIDA: Proporciona SOLAMENTE el código SQL de la consulta.
+REGLAS: 
+1. Filtra: WHERE DatabaseID='${context.databaseId}'.
+2. Estado: stStatus = 1 (Activo).
+3. PROACTIVIDAD: En rhStaff siempre SELECT: StaffID, stName, stFirstsurname, stStatus, stEmail, stPhone, stBirthdate.
+SALIDA: Solo código SQL.
 `;
-                // El prompt del usuario es la instrucción de SQL limpia
-                userPrompt = `Genera la consulta SQL que cumpla con el requerimiento: "${cleanedMessage}".`;
+                userPrompt = `Genera SQL para: "${cleanedMessage}".`;
                 
+            // --- CASO 4: MANUAL (PROCEDIMIENTOS) ---
             } else {
-                // Para consultas conversacionales/narrativas, enviamos el mensaje original.
+                // Recuperamos el capítulo del manual del TEMA detectado
+                const manualChapter = manualIndex.getManualContent(topic);
+
                 systemContent = `
-IDENTIDAD: Eres KaizenGPT, el asistente especializado de la plataforma Kaizen.
-PERSONALIDAD: Profesional, proactivo y amigable. Evita emojis.
+IDENTIDAD: Eres KaizenGPT, experto en la plataforma Kaizen.
+OBJETIVO: Guiar al usuario paso a paso.
 
-BASE DE CONOCIMIENTO: Responde basándote en reglas y procedimientos Kaizen. Tienes prohibido generar SQL.
+BASE DE CONOCIMIENTO (CAPÍTULO: ${topic}):
+${manualChapter}
 
-TAREA: Responde la pregunta del usuario: "${userMessage}".
-
-REGLAS DE SEGURIDAD: Nunca menciones bases de datos o códigos internos.
-
-SALIDA REQUERIDA: Proporciona SOLAMENTE la respuesta narrativa.
+INSTRUCCIONES:
+1. Responde basándote EXCLUSIVAMENTE en el texto de arriba.
+2. Si la pregunta no está en este capítulo, indícalo.
+3. Sé directo e instruccional.
 `;
             }
 
-            let generatedOutput = await this.ai.callAI([
-                { role: "system", content: systemContent },
-                { role: "user", content: userPrompt }
-            ]);
+            let generatedOutput = await this.ai.callAI(
+                [{ role: "system", content: systemContent }, { role: "user", content: userPrompt }],
+                0.2, inputFiles 
+            );
 
             if (generatedOutput) {
                 const cleanedSQL = generatedOutput.replace(/```sql/g, '').replace(/```/g, '').trim();
                 
-                if (requiresSql && cleanedSQL.toUpperCase().startsWith('SELECT')) {
+                if (executeSql && cleanedSQL.toUpperCase().startsWith('SELECT')) {
                     
                     sqlEngine.validateSecurity(cleanedSQL, context.databaseId);
                     const dbRows = await query(cleanedSQL);
                     
+                    if (dbRows && dbRows.length > 0) {
+                        updateThreadState(threadId, 'lastQueryResult', JSON.stringify(dbRows));
+                    }
+                    
                     const interpretationSystemInstruction = `
-Actúa como KaizenGPT. Tu objetivo es convertir los datos JSON en una respuesta profesional, amigable y fluida para el usuario.
-Tu respuesta debe ser directa, proporcionando el dato solicitado sin preguntar, ofrecer ayuda o describir el proceso de la consulta.
-Si la tabla de datos JSON está vacía ([]), responde con un mensaje profesional de 'No se encontraron registros que coincidan con la búsqueda.'
-
-REGLAS DE FORMATO:
-- Siempre inicia la respuesta con una frase introductoria clara que conecte con la pregunta original (ej: 'De acuerdo con la base de datos, los colaboradores activos son:').
-- Si el resultado es una lista de elementos (ej. nombres), formatéalos usando viñetas y saltos de línea para facilitar la lectura.
-
+Actúa como KaizenGPT. Convierte datos JSON a respuesta profesional.
+Si está vacío, di 'No se encontraron registros'.
+Usa viñetas.
 Datos JSON: ${JSON.stringify(dbRows)}
 `;
-
                     const interpretation = await this.ai.callAI([
                         { role: "system", content: interpretationSystemInstruction },
                         { role: "user", content: `Pregunta original: ${userMessage}` }
                     ]);
                     
-                    return interpretation || "No se pudo generar una respuesta narrativa. Por favor, reformula tu pregunta.";
-
-                } else if (!requiresSql) {
+                    return interpretation || "Sin respuesta narrativa.";
+                } else {
                     return generatedOutput;
                 }
             }
 
-            console.log("🔄 Usando Motor de Inferencia Local...");
-            const localIntent = this.localEngine.detectIntent(userMessage);
-
-            if (localIntent.type === 'UNKNOWN' || localIntent.type.startsWith('PROCEDURE_')) {
-                return "Lo siento, sin mi conexión neuronal completa (API Key), solo puedo responder sobre Asistencias, Conteos y Proyectos. ¿Podrías reformular?";
-            }
-
-            const localSQL = this.localEngine.generateSQL(localIntent, context);
-            console.log(`⚡ SQL Local Generado: ${localSQL}`);
-            
-            const dbRows = await query(localSQL);
-            return this.localEngine.formatResponse(localIntent, dbRows);
+            return "Lo siento, no pude procesar la solicitud.";
 
         } catch (error) {
-            console.error("Kaizen Orchestrator Error:", error);
-            return "Ocurrió un error interno procesando la solicitud. Por favor verifica los logs del servidor.";
+            console.error("Orchestrator Error:", error);
+            return "Error interno.";
         }
     }
 }
