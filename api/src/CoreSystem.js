@@ -127,7 +127,6 @@ soTrainingsLns (TrainingLineID, isDeleted, DatabaseID, TrainingID, CompanyID, St
         
         const tableContextLines = this.schemaContext.split('\n');
         for (const tableName of tableNames) {
-            // Corrección de robustez: Buscamos coincidencia exacta de nombre seguido de espacio o paréntesis
             const line = tableContextLines.find(line => {
                 const t = line.trim();
                 return t.startsWith(tableName + ' ') || t.startsWith(tableName + '(');
@@ -157,7 +156,6 @@ export class QueryBuilder {
         const forbidden = ['INSERT', 'UPDATE', 'DELETE', 'DROP', 'ALTER', 'TRUNCATE', 'GRANT', 'REVOKE'];
         if (forbidden.some(word => upperSql.includes(word))) throw new Error("Security Alert: Solo SELECT permitido.");
         
-        // Advertencia si no se usa DatabaseID (pero no bloquea por si la IA usa alias complejos)
         if (!upperSql.includes(clientDatabaseId.toUpperCase())) console.warn(`⚠️ Advertencia: SQL sin filtro explícito DatabaseID.`);
         return sql;
     }
@@ -171,10 +169,6 @@ export class TranslationLayer {
 export const kb = new SystemKnowledgeBase();
 export const sqlEngine = new QueryBuilder(kb);
 export const translator = new TranslationLayer();
-
-// ==========================================
-// INTEGRACIÓN CON GEMINI API
-// ==========================================
 
 const apiKey = process.env.GEMINI_API_KEY;
 let model = null;

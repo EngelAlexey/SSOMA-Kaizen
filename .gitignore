@@ -6,3 +6,4 @@ google-key.json
 !package-lock.json
 api/certs/server-ca.pem
 **/certs
+*.node_modules

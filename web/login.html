@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KaizenGPT | Iniciar sesión</title>
+    <!-- Enlaces limpios -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.14.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="login.css">
+    <link rel="shortcut icon" href="./assets/Icon App.png" type="image/x-icon">
+</head>
+<body>
+
+    <div class="background-layer"></div>
+    <div class="veil"></div>
+
+    <div id="toast-container"></div>
+
+    <div class="container" id="container">
+        
+        <!-- MODO INVITADO -->
+        <div class="form-container sign-up-container">
+            <form action="#" id="guest-form">
+                <h1>Modo de prueba</h1>
+                <div class="social-container">
+                    <i class="fas fa-globe-americas" style="font-size: 24px; color: #fff; opacity: 0.8;"></i>
+                </div>
+                <p>
+                    Accede al asistente con conocimientos generales de seguridad normativa.
+                    <br><br>
+                    <span style="font-size: 11px; opacity: 0.6; display: block;">(Sin acceso a datos privados de la organización)</span>
+                </p>
+                <button class="modal-btn primary" id="btn-guest-access">Continuar como Invitado</button>
+            </form>
+        </div>
+
+        <div class="form-container sign-in-container">
+            <form action="#" id="license-form">
+                <img src="./assets/Kaizen B.png" alt="Logo" style="width: 48px; margin-bottom: 15px; opacity: 0.9;">
+                
+                <h1 style="margin-bottom: 5px;">Kaizen Intelligence</h1>
+                <span style="margin-bottom: 25px; font-size: 11px; text-transform: uppercase; letter-spacing: 2px; opacity: 0.7;">Plataforma Corporativa</span>
+                
+                <div style="width: 100%; text-align: left; margin-bottom: 5px;">
+                    <label style="font-size: 11px; color: #888; margin-left: 5px; font-weight: 600;">LICENCIA DE ACCESO</label>
+                </div>
+                <input type="text" id="license-input" class="modal-input" style="text-align: center; font-family: monospace; font-size: 16px; letter-spacing: 2px; font-weight: 600;" required autocomplete="off" />
+                
+                <button class="modal-btn primary" type="submit" style="margin-top: 25px;">Ingresar</button>
+            </form>
+        </div>
+
+        <div class="overlay-container">
+            <div class="overlay">
+                <div class="overlay-panel overlay-left">
+                    <h1 style="font-size: 24px;">Acceso Clientes</h1>
+                    <p>Entorno seguro para la gestión y consulta de documentación interna vectorizada.</p>
+                    <button class="modal-btn ghost" id="signIn">Usar Licencia</button>
+                </div>
+                <div class="overlay-panel overlay-right">
+                    <h1 style="font-size: 24px;">¿Visitante?</h1>
+                    <p>Si aún no dispones de una licencia corporativa, puedes probar las capacidades generales de nuestra IA.</p>
+                    <button class="modal-btn ghost" id="signUp">Probar Demo</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <footer style="border-top: none;">
+        <p style="opacity: 0.6; font-size: 11px; letter-spacing: 0.5px;">
+            POWERED BY KAIZEN SOFTWARE © 2025
+            <span style="margin: 0 10px; opacity: 0.3;">|</span>
+            <a href="mailto:info@kaizenapps.net?subject=Ayuda%20Acceso%20Kaizen" class="help-link">
+                <i class="fas fa-envelope" style="margin-right: 5px;"></i> Solicitar Ayuda
+            </a>
+        </p>
+    </footer>
+
+    <script src="login-script.js"></script>
+</body>
+</html>
