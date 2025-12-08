@@ -1,5 +1,8 @@
 import { ChatOrchestrator } from "../ChatFlow.js";
-import { saveChatMessage } from "../chatMemory.js";
+import {
+  saveChatMessage,
+  getThreadOwner
+} from "../chatMemory.js";
 
 const chatOrchestrator = new ChatOrchestrator();
 
@@ -8,18 +11,14 @@ function collectFilesFromRequest(req) {
 
   if (Array.isArray(req.files)) {
     for (const f of req.files) {
-      if (f) {
-        collected.push(f);
-      }
+      if (f) collected.push(f);
     }
   } else if (req.files && typeof req.files === "object") {
     const values = Object.values(req.files);
     for (const entry of values) {
       if (Array.isArray(entry)) {
         for (const f of entry) {
-          if (f) {
-            collected.push(f);
-          }
+          if (f) collected.push(f);
         }
       } else if (entry) {
         collected.push(entry);
@@ -36,41 +35,82 @@ function collectFilesFromRequest(req) {
 
 export async function handleChatQuery(req, res) {
   try {
+    // Texto del mensaje
     const rawMessage =
       typeof req.body.query === "string" ? req.body.query : req.body.message;
     const message = typeof rawMessage === "string" ? rawMessage.trim() : "";
 
+    // Archivos adjuntos
     const files = collectFilesFromRequest(req);
     const hasFiles = files.length > 0;
 
-    let databaseId = req.body.databaseId;
-    if (!databaseId && req.userContext && req.userContext.prefix) {
-      databaseId = req.userContext.prefix;
-    }
+    // Identidad real del usuario (desde el token)
+    const userContext = req.userContext || {};
+
+    const licenseId =
+      userContext.userId ||      
+      req.body.userId ||             
+      null;
+
+    const prefixFromToken = userContext.prefix || null;
+    let databaseId = prefixFromToken || req.body.databaseId || null;
 
     const threadId = req.body.threadId || null;
-    const userId =
-      req.body.userId ||
-      (req.userContext && req.userContext.userId) ||
-      "Guest";
+
+    const userForLog =
+      userContext.userName ||
+      licenseId ||
+      "Usuario";
 
     if (!message && !hasFiles) {
       return res.status(400).json({
         success: false,
-        error: "El mensaje o al menos un archivo son requeridos."
+        error: "missing_content",
+        message: "El mensaje o al menos un archivo son requeridos."
       });
     }
 
-    const logMessage = message && message.length > 0 ? message : "[solo archivo]";
+    if (threadId) {
+      const owner = await getThreadOwner(threadId);
+      if (owner) {
+        const ownerLicenseId = owner.ctLicenseID;
+        const ownerPrefix = owner.ctClientPrefix;
+
+        if (
+          (licenseId && ownerLicenseId && ownerLicenseId !== licenseId) ||
+          (prefixFromToken && ownerPrefix && ownerPrefix !== prefixFromToken)
+        ) {
+          console.warn(
+            `[Chat] Acceso NO AUTORIZADO al hilo ${threadId} por licencia ${licenseId} (owner licencia ${ownerLicenseId})`
+          );
+          return res.status(403).json({
+            success: false,
+            error: "unauthorized_thread",
+            message: "No tienes permiso para acceder a este chat."
+          });
+        }
+
+        if (ownerPrefix) {
+          databaseId = ownerPrefix;
+        }
+      }
+    }
+
+    const logMessage =
+      message && message.length > 0 ? message : "[solo archivo]";
     console.log(
-      `[Chat] User: ${userId} | DB: ${databaseId || "None"} | Msg: ${logMessage}`
+      `[Chat] User: ${userForLog} | LicenseID: ${
+        licenseId || "N/A"
+      } | DB: ${databaseId || "None"} | Thread: ${
+        threadId || "None"
+      } | Msg: ${logMessage}`
     );
     console.log(`[Chat][Files] Adjuntos recibidos: ${files.length}`);
 
     const reply = await chatOrchestrator.handleUserMessage(message, databaseId, {
       files,
       threadId,
-      userContext: req.userContext
+      userContext
     });
 
     if (threadId && databaseId) {
@@ -78,10 +118,26 @@ export async function handleChatQuery(req, res) {
         message && message.length > 0
           ? message
           : "Mensaje sin texto, con archivos adjuntos.";
+
       try {
-        await saveChatMessage(threadId, databaseId, "user", userContent);
+        await saveChatMessage(
+          threadId,
+          databaseId,
+          "user",
+          userContent,
+          licenseId,
+          null 
+        );
+
         if (typeof reply === "string" && reply.trim().length > 0) {
-          await saveChatMessage(threadId, databaseId, "model", reply);
+          await saveChatMessage(
+            threadId,
+            databaseId,
+            "model",
+            reply,
+            licenseId,
+            null
+          );
         }
       } catch (error) {
         console.error("Error guardando historial de chat:", error);
