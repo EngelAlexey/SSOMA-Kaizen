@@ -4,7 +4,6 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 
-// Configuración de la conexión
 const dbConfig = {
   host: process.env.MYSQL_HOST || process.env.DB_HOST,
   user: process.env.MYSQL_USER || process.env.DB_USER,
@@ -16,7 +15,6 @@ const dbConfig = {
   queueLimit: 0
 };
 
-// Configuración SSL
 const certPath = process.env.MYSQL_SSL_CA_PATH || '/etc/secrets/server-ca.pem';
 const localCertPath = path.resolve(process.cwd(), './certs/server-ca.pem');
 const finalCertPath = fs.existsSync(certPath) ? certPath : localCertPath;
@@ -29,10 +27,8 @@ if (fs.existsSync(finalCertPath)) {
   };
 }
 
-// --- IMPORTANTE: Agregamos 'export' aquí para que auth.js pueda usar la conexión ---
 export const pool = mysql.createPool(dbConfig);
 
-// Funciones Auxiliares
 function generarHashLicencia(licencia) {
   const secret = process.env.EDGE_HMAC_SECRET || ''; 
   return crypto.createHmac('sha256', secret)

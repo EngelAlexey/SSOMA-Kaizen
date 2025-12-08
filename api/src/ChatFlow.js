@@ -10,6 +10,11 @@ const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-001" });
 export class ChatOrchestrator {
   constructor() {
     this.history = [];
+    this.documentsByThread = new Map();
+  }
+
+  createDocId() {
+    return Date.now().toString(36) + "-" + Math.random().toString(36).slice(2);
   }
 
   isImageLikeFile(file) {
@@ -27,28 +32,152 @@ export class ChatOrchestrator {
     return false;
   }
 
+  isDocumentLikeFile(file) {
+    if (!file) {
+      return false;
+    }
+    const mime = (file.mimetype || file.type || "").toLowerCase();
+    const name = (file.originalname || file.filename || file.name || "").toLowerCase();
+    if (
+      mime === "application/pdf" ||
+      mime === "text/plain" ||
+      mime === "text/csv" ||
+      mime === "application/json" ||
+      mime === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
+      mime === "application/vnd.ms-excel"
+    ) {
+      return true;
+    }
+    if (
+      name.endsWith(".pdf") ||
+      name.endsWith(".txt") ||
+      name.endsWith(".csv") ||
+      name.endsWith(".json") ||
+      name.endsWith(".xlsx") ||
+      name.endsWith(".xls")
+    ) {
+      return true;
+    }
+    return false;
+  }
+
+  buildDocPartsFromMemory(docs) {
+    if (!Array.isArray(docs) || docs.length === 0) {
+      return [];
+    }
+    const sorted = [...docs].sort((a, b) => {
+      const ca = a.createdAt || 0;
+      const cb = b.createdAt || 0;
+      return ca - cb;
+    });
+    const maxDocs = 3;
+    const recent = sorted.slice(Math.max(0, sorted.length - maxDocs));
+    const parts = [];
+    for (const doc of recent) {
+      const name = doc.name || "Document";
+      if (doc.kind === "text" && doc.text) {
+        parts.push({
+          text: `Relevant content from document "${name}":\n${doc.text}`
+        });
+      } else if (doc.kind === "inlineData" && doc.data && doc.mimeType) {
+        parts.push({
+          inlineData: {
+            data: doc.data,
+            mimeType: doc.mimeType
+          }
+        });
+      }
+    }
+    return parts;
+  }
+
+  async isDocFollowUp(message, memory = { summary: "", messages: [] }, docs = []) {
+    if (!message) {
+      return false;
+    }
+    if (!Array.isArray(docs) || docs.length === 0) {
+      return false;
+    }
+    const historyText = this.formatHistory(memory.messages);
+    const names = docs.map(d => d.name).filter(Boolean);
+    let prompt = `
+You will receive a user message inside an ongoing conversation with a SSOMA assistant that already has one or more documents attached.
+Your task is to decide whether the message is asking about the content of those documents, including questions about calculations, amounts, results, columns or rows, even if the user does not mention the document by name.
+Be tolerant of synonyms and minor spelling mistakes. Only if the message is too ambiguous or unreadable should you treat it as NOT related to the documents.
+Respond with a single word only: YES if the message refers to the content of the documents, or NO if it is about something else (for example a direct database query, a greeting, or a theoretical question).
+`.trim();
+    if (names.length > 0) {
+      prompt += `
+
+Documents already available in this conversation:
+${names.map(n => `- ${n}`).join("\n")}`;
+    }
+    if (memory.summary && memory.summary.trim().length > 0) {
+      prompt += `
+
+Previous conversation summary:
+${memory.summary.trim()}`;
+    }
+    if (historyText && historyText.trim().length > 0) {
+      prompt += `
+
+Recent conversation history:
+${historyText.trim()}`;
+    }
+    prompt += `
+
+Current user message:
+"${message}"
+`.trim();
+    try {
+      const result = await model.generateContent(prompt);
+      const raw = result.response.text() || "";
+      const norm = raw.trim().toUpperCase();
+      if (norm.startsWith("Y")) {
+        return true;
+      }
+      return false;
+    } catch (error) {
+      console.error("Error in isDocFollowUp:", error);
+      return false;
+    }
+  }
+
   async handleUserMessage(userMessage, databaseId, options = {}) {
     const text = typeof userMessage === "string" ? userMessage.trim() : "";
     const files = Array.isArray(options.files) ? options.files : [];
     const hasText = text.length > 0;
+
     const imageFiles = files.filter(f => this.isImageLikeFile(f));
-    const otherFiles = files.filter(f => !this.isImageLikeFile(f));
+    const documentFiles = files.filter(f => this.isDocumentLikeFile(f) && !this.isImageLikeFile(f));
+    const unsupportedFiles = files.filter(
+      f => !this.isImageLikeFile(f) && !this.isDocumentLikeFile(f)
+    );
+
     const threadId = options.threadId || null;
 
     let memory = { summary: "", messages: [] };
+    let persistedDocs = [];
+
+    if (threadId) {
+      const stored = this.documentsByThread.get(threadId);
+      if (Array.isArray(stored) && stored.length > 0) {
+        persistedDocs = stored;
+      }
+    }
 
     if (threadId && databaseId) {
       try {
         const rawHistory = await getChatHistory(threadId, databaseId, 80);
         memory = await this.buildConversationMemory(rawHistory);
       } catch (error) {
-        console.error("Error construyendo memoria de conversación:", error);
+        console.error("Error building conversation memory:", error);
       }
     }
 
     try {
-      if (imageFiles.length > 0) {
-        console.log("[Chat][Images] Archivos de imagen recibidos:", imageFiles.map(f => ({
+      if (imageFiles.length > 0 && documentFiles.length === 0) {
+        console.log("[Chat][Images] Image files received:", imageFiles.map(f => ({
           fieldname: f.fieldname,
           mimetype: f.mimetype,
           size: f.size,
@@ -58,12 +187,50 @@ export class ChatOrchestrator {
         return await this.handleImageQuery(text, databaseId, imageFiles, options, memory);
       }
 
-      if (!hasText && otherFiles.length > 0) {
-        return "Por ahora solo puedo analizar imágenes. Adjunta una imagen compatible o acompaña el archivo con una pregunta concreta.";
+      if (documentFiles.length > 0 && imageFiles.length === 0) {
+        console.log("[Chat][Docs] Document files received:", documentFiles.map(f => ({
+          fieldname: f.fieldname,
+          mimetype: f.mimetype,
+          size: f.size,
+          path: f.path || null,
+          hasBuffer: !!f.buffer
+        })));
+        return await this.handleDocumentQuery(text, databaseId, documentFiles, { ...options }, memory);
       }
 
-      if (!hasText) {
-        return "Escribe una consulta o adjunta una imagen para que pueda ayudarte.";
+      if (documentFiles.length > 0 && imageFiles.length > 0) {
+        console.log("[Chat][Docs+Images] Mixed files received:", {
+          images: imageFiles.map(f => ({
+            fieldname: f.fieldname,
+            mimetype: f.mimetype,
+            size: f.size
+          })),
+          docs: documentFiles.map(f => ({
+            fieldname: f.fieldname,
+            mimetype: f.mimetype,
+            size: f.size
+          }))
+        });
+        return await this.handleDocumentQuery(text, databaseId, documentFiles, { ...options }, memory);
+      }
+
+      if (!hasText && unsupportedFiles.length > 0 && imageFiles.length === 0 && documentFiles.length === 0) {
+        return "Por ahora puedo analizar imágenes y documentos en formatos PDF, TXT, CSV, JSON y Excel (XLSX/XLS). El archivo enviado no es compatible con el análisis directo.";
+      }
+
+      if (!hasText && files.length > 0 && imageFiles.length === 0 && documentFiles.length === 0) {
+        return "Por ahora puedo analizar imágenes y documentos en formatos PDF, TXT, CSV, JSON y Excel (XLSX/XLS). Adjunta un archivo compatible o acompaña el archivo con una pregunta concreta.";
+      }
+
+      if (!hasText && files.length === 0) {
+        return "Escribe una consulta o adjunta un archivo (imagen o documento compatible) para que pueda ayudarte.";
+      }
+
+      if (hasText && imageFiles.length === 0 && documentFiles.length === 0 && persistedDocs.length > 0) {
+        const isFollowUp = await this.isDocFollowUp(text, memory, persistedDocs);
+        if (isFollowUp) {
+          return await this.handleDocFollowUpQuery(text, databaseId, persistedDocs, memory);
+        }
       }
 
       if (!databaseId) {
@@ -78,7 +245,7 @@ export class ChatOrchestrator {
 
       return await this.handleGeneralQuery(text, memory);
     } catch (error) {
-      console.error("Error en handleUserMessage:", error);
+      console.error("Error in handleUserMessage:", error);
       return "Lo siento, ocurrió un error interno al procesar tu mensaje.";
     }
   }
@@ -86,31 +253,32 @@ export class ChatOrchestrator {
   async determineIntent(message, memory = { summary: "", messages: [] }) {
     const historyText = this.formatHistory(memory.messages);
     let prompt = `
-Clasifica el siguiente mensaje en una categoría: "DATA_QUERY" o "GENERAL".
-Usa "DATA_QUERY" cuando el usuario pida consultar, filtrar, contar, listar o resumir información almacenada en la base de datos (registros, indicadores, reportes, estadísticas).
-Usa "GENERAL" para saludos, preguntas conceptuales, solicitudes de explicación, redacción de textos o cuando no sea claro que necesita datos de la base de datos.
+Classify the following message into one category: "DATA_QUERY" or "GENERAL".
+Use "DATA_QUERY" when the user is asking to query, filter, count, list or summarize information stored in the database (records, indicators, reports, statistics).
+Use "GENERAL" for greetings, conceptual questions, explanations, text drafting or when it is not clearly a request for database data.
+Be tolerant of synonyms and minor spelling mistakes. Only if the message is too ambiguous or unreadable should you classify it as GENERAL so the assistant can ask for clarification.
 `.trim();
 
     if (memory.summary && memory.summary.trim().length > 0) {
       prompt += `
 
-Resumen previo de la conversación:
+Previous conversation summary:
 ${memory.summary.trim()}`;
     }
 
     if (historyText && historyText.trim().length > 0) {
       prompt += `
 
-Mensajes recientes de la conversación:
+Recent conversation messages:
 ${historyText.trim()}`;
     }
 
     prompt += `
 
-Mensaje actual del usuario:
+Current user message:
 "${message}"
 
-Responde SOLO con una de las dos palabras: DATA_QUERY o GENERAL.
+Respond with exactly one of the two words: DATA_QUERY or GENERAL.
 `.trim();
 
     try {
@@ -122,7 +290,7 @@ Responde SOLO con una de las dos palabras: DATA_QUERY o GENERAL.
       }
       return "GENERAL";
     } catch (error) {
-      console.error("Error en determineIntent:", error);
+      console.error("Error in determineIntent:", error);
       return "GENERAL";
     }
   }
@@ -147,52 +315,57 @@ Responde SOLO con una de las dos palabras: DATA_QUERY o GENERAL.
         }
       }
     } catch (error) {
-      console.error("Error obteniendo tablas de la base de datos:", error);
+      console.error("Error getting database tables:", error);
     }
 
     const historyText = this.formatHistory(memory.messages);
     const contextParts = [];
 
     if (memory.summary && memory.summary.trim().length > 0) {
-      contextParts.push("Resumen previo de la conversación entre el usuario y el asistente:\n" + memory.summary.trim());
+      contextParts.push("Previous conversation summary between the user and the assistant:\n" + memory.summary.trim());
     }
 
     if (historyText && historyText.trim().length > 0) {
-      contextParts.push("Historial reciente de la conversación entre el usuario y el asistente. Úsalo para interpretar referencias como \"estos registros\", \"la persona desactivada\", \"el reporte anterior\" o \"la consulta pasada\":\n" + historyText.trim());
+      contextParts.push(
+        "Recent conversation history. Use it to interpret references like \"those records\", \"the deactivated person\", \"the previous report\" or \"the last query\":\n" +
+          historyText.trim()
+      );
     }
 
     if (availableTables) {
-      contextParts.push("TABLAS DISPONIBLES EN ESTA BASE DE DATOS:\n" + availableTables);
+      contextParts.push("TABLES AVAILABLE IN THIS DATABASE:\n" + availableTables);
     }
 
     if (schemaContext) {
-      contextParts.push("SCHEMA DETALLADO DEL SISTEMA KAIZEN:\n" + schemaContext);
+      contextParts.push("DETAILED SCHEMA OF THE KAIZEN SYSTEM:\n" + schemaContext);
     }
 
     const fullContext = contextParts.join("\n\n");
 
     const sqlPrompt = `
-Eres un experto en SQL MySQL para el sistema Kaizen de SSOMA.
-Tu tarea es generar UNA sola sentencia SQL de solo lectura (SELECT) para responder a la pregunta del usuario.
+You are an expert in MySQL SQL for the Kaizen SSOMA system.
+Your task is to generate a single read-only SQL statement (SELECT) that answers the user's question.
 
-Contexto de la base de datos del cliente con ID "${databaseId}":
+Client database ID: "${databaseId}"
+
+Context:
 ${fullContext}
 
-Reglas:
-1. Usa exclusivamente tablas que existan en la lista de "TABLAS DISPONIBLES EN ESTA BASE DE DATOS".
-2. Utiliza el contexto de esquema del sistema Kaizen para elegir columnas correctas y respetar los tipos de datos descritos allí.
-3. No inventes nombres de tablas ni columnas. Si no encuentras tablas adecuadas para responder a la pregunta, responde exactamente: NO_VALID_SQL.
-4. La sentencia debe ser un SELECT completo que termine con punto y coma.
-5. No uses instrucciones DML o DDL como INSERT, UPDATE, DELETE, DROP, ALTER, TRUNCATE, GRANT ni REVOKE.
-6. Siempre que el esquema lo permita, incluye una condición en la cláusula WHERE que limite la consulta al cliente cuyo identificador es "${databaseId}" utilizando la columna de identificador de base de datos correspondiente (por ejemplo DatabaseID u otra especificada en el esquema).
-7. Cuando el esquema indique que un campo de estado se representa con valores numéricos (por ejemplo 1 para activo y 0 para inactivo), utiliza esos valores en la cláusula WHERE en lugar de texto como 'Activo' o 'Inactivo'.
-8. Si la pregunta hace referencia a resultados anteriores de esta misma conversación (por ejemplo: "¿Cómo se llama la persona desactivada?", "Y la lista de desactivados?", "Y los nombres?"), reutiliza la misma tabla y condiciones lógicas que se usaron antes cuando sea coherente, y genera un SELECT que devuelva los registros correspondientes. Si hay más de un posible registro, devuelve una lista de todas las filas que cumplan el criterio.
-9. Solo usa NO_VALID_SQL cuando realmente no exista ninguna tabla adecuada para responder, no cuando la pregunta sea ambigua pero pueda responderse devolviendo un conjunto de registros.
+Rules:
+1. Use only tables that exist in the list "TABLES AVAILABLE IN THIS DATABASE".
+2. Use the Kaizen schema context to choose correct columns and respect described data types.
+3. Do not invent table or column names. If there are no suitable tables to answer the question, respond exactly with: NO_VALID_SQL.
+4. The statement must be a complete SELECT ending with a semicolon.
+5. Do not use DML or DDL instructions such as INSERT, UPDATE, DELETE, DROP, ALTER, TRUNCATE, GRANT or REVOKE.
+6. Whenever the schema allows it, include a WHERE condition that restricts the query to the client whose identifier is "${databaseId}", using the appropriate database identifier column (for example DatabaseID or another specified in the schema).
+7. When the schema indicates that a status field is numeric (for example 1 for active and 0 for inactive), use those numeric values instead of text like 'Activo' or 'Inactivo'.
+8. If the question refers to results from earlier in this same conversation (for example: "What is the name of the deactivated person?", "And the list of inactive ones?", "And the names?"), reuse the same table and logical conditions that were used before when it makes sense, and generate a SELECT that returns the matching records. If there is more than one possible record, return a list of all rows that satisfy the criteria.
+9. Be tolerant of synonyms and minor spelling mistakes. Only if the message is too ambiguous or unreadable should you respond exactly with NO_VALID_SQL instead of trying to build an unsafe query.
 
-Pregunta del usuario:
+User question:
 "${message}"
 
-Devuelve únicamente la sentencia SQL o, si no es posible generar una consulta válida, la palabra NO_VALID_SQL.
+Return only the SQL statement, or the word NO_VALID_SQL if you cannot generate a valid query.
 `.trim();
 
     try {
@@ -201,7 +374,11 @@ Devuelve únicamente la sentencia SQL o, si no es posible generar una consulta v
       const upperRaw = raw.trim().toUpperCase();
 
       let sql = null;
-      if (!upperRaw.includes("NO_VALID_SQL")) {
+      let invalidOrAmbiguous = false;
+
+      if (upperRaw.includes("NO_VALID_SQL")) {
+        invalidOrAmbiguous = true;
+      } else {
         sql = this.extractFirstSqlStatement(raw);
       }
 
@@ -210,6 +387,9 @@ Devuelve únicamente la sentencia SQL o, si no es posible generar una consulta v
       }
 
       if (!sql) {
+        if (invalidOrAmbiguous) {
+          return "No logro identificar claramente qué información de la base de datos necesitas. Intenta reformular tu pregunta con más detalle o con menos abreviaturas.";
+        }
         return "No existe una tabla adecuada en la base de datos para responder exactamente a esa pregunta.";
       }
 
@@ -219,7 +399,7 @@ Devuelve únicamente la sentencia SQL o, si no es posible generar una consulta v
           finalSql = sqlEngine.validateSecurity(sql, databaseId);
         }
       } catch (error) {
-        console.error("Error en validación de seguridad SQL:", error);
+        console.error("Error in SQL security validation:", error);
         return "La consulta generada no es segura y no se ejecutará.";
       }
 
@@ -230,7 +410,7 @@ Devuelve únicamente la sentencia SQL o, si no es posible generar una consulta v
         while ((match = regex.exec(finalSql)) !== null) {
           const table = (match[2] || match[4] || "").toUpperCase();
           if (table && !allowed.has(table)) {
-            console.warn("Tabla no permitida en SQL generado:", table);
+            console.warn("Table not allowed in generated SQL:", table);
             return "La consulta generada hace referencia a tablas que no existen en esta base de datos. Reformula tu pregunta de otra manera o indica el módulo específico.";
           }
         }
@@ -257,26 +437,28 @@ Devuelve únicamente la sentencia SQL o, si no es posible generar una consulta v
       const explainContext = explainPieces.join("\n\n");
 
       const explainPrompt = `
-Eres un asistente virtual experto en SSOMA que responde a usuarios no técnicos.
-Ten en cuenta el contexto de la conversación para mantener coherencia en las respuestas.
+You are a virtual assistant specialized in SSOMA and you respond to non-technical users.
+Always answer in the same language as the user's message.
+Take the conversation context into account to keep answers consistent.
+Be tolerant of synonyms and minor spelling mistakes; if the question is still too ambiguous, ask the user to restate it with more detail.
 
-Contexto previo:
-${explainContext || "(sin contexto adicional)"}
+Conversation context:
+${explainContext || "(no additional context)"}
 
-Pregunta actual del usuario:
+Current user question:
 "${message}"
 
-Resultados de la base de datos en formato JSON:
+Database results in JSON:
 ${JSON.stringify(dbResults)}
 
-Redacta una respuesta clara en español que explique los datos de forma comprensible.
-Si no hay resultados, explícalo de forma amable e indica posibles motivos.
+Write a clear explanation of these data that the user can easily understand.
+If there are no results, explain this politely and mention possible reasons.
 `.trim();
 
       const explainResult = await model.generateContent(explainPrompt);
       return explainResult.response.text();
     } catch (error) {
-      console.error("Error en handleDataQuery:", error);
+      console.error("Error in handleDataQuery:", error);
       return "Lo siento, hubo un problema al ejecutar la consulta en la base de datos.";
     }
   }
@@ -284,28 +466,29 @@ Si no hay resultados, explícalo de forma amable e indica posibles motivos.
   async handleGeneralQuery(message, memory = { summary: "", messages: [] }) {
     const historyText = this.formatHistory(memory.messages);
     let prompt = `
-Eres un asistente virtual experto en Seguridad y Salud Ocupacional (SSOMA) y en el uso del software Kaizen.
-Responde siempre en español, de forma clara, práctica y orientada a la acción.
-Cuando sea útil, organiza la información en listas o pasos.
+You are a virtual assistant specialized in Occupational Health and Safety (SSOMA) and in the Kaizen software.
+Always answer in the same language as the user's message.
+Give clear, practical, action-oriented answers. When useful, organize information into steps or bullet points.
+Be tolerant of synonyms and minor spelling mistakes. Only if the message is too ambiguous or unreadable should you ask the user to clarify the question before continuing.
 `.trim();
 
     if (memory.summary && memory.summary.trim().length > 0) {
       prompt += `
 
-Resumen previo de la conversación:
+Previous conversation summary:
 ${memory.summary.trim()}`;
     }
 
     if (historyText && historyText.trim().length > 0) {
       prompt += `
 
-Historial reciente de la conversación entre el usuario y el asistente:
+Recent conversation history:
 ${historyText.trim()}`;
     }
 
     prompt += `
 
-Consulta del usuario:
+User message:
 "${message}"
 `.trim();
 
@@ -313,7 +496,7 @@ Consulta del usuario:
       const result = await model.generateContent(prompt);
       return result.response.text();
     } catch (error) {
-      console.error("Error en handleGeneralQuery:", error);
+      console.error("Error in handleGeneralQuery:", error);
       return "Lo siento, no puedo responder a eso ahora.";
     }
   }
@@ -325,40 +508,44 @@ Consulta del usuario:
 
     if (hasText) {
       instruction = `
-Eres un experto en Seguridad y Salud Ocupacional (SSOMA).
-Analiza la imagen proporcionada en el contexto de la consulta del usuario.
-Sigue las instrucciones del usuario de forma prioritaria y utiliza la imagen como fuente principal de información.
+You are an expert in Occupational Health and Safety (SSOMA).
+Analyze the provided image in the context of the user's question.
+Follow the user's instructions as the highest priority and use the image as the main source of information.
+Answer in the same language as the user's message.
+Be tolerant of synonyms and minor spelling mistakes. If the question is too ambiguous or unreadable, ask the user to clarify what they need from the image.
 `.trim();
     } else {
       instruction = `
-Eres un experto en Seguridad y Salud Ocupacional (SSOMA).
-Analiza detalladamente la imagen proporcionada y describe como mínimo:
-1) La actividad que realiza la persona o personas.
-2) El equipo de protección personal (EPP) visible, listando cada elemento.
-3) Los riesgos presentes y las fuentes de daño.
-4) Cualquier acto o condición subestándar que observes.
-5) Recomendaciones concretas para mejorar la seguridad.
+You are an expert in Occupational Health and Safety (SSOMA).
+Analyze the provided image in detail and at least describe:
+1) The activity the person or people are performing.
+2) The visible PPE (personal protective equipment), listing each element.
+3) The present risks and sources of harm.
+4) Any substandard acts or conditions you observe.
+5) Concrete recommendations to improve safety.
+When later text messages are provided about this image, answer in the same language as those messages.
+Be tolerant of synonyms and minor spelling mistakes in later questions about this image.
 `.trim();
     }
 
     if (memory.summary && memory.summary.trim().length > 0) {
       instruction += `
 
-Resumen previo de la conversación entre el usuario y el asistente:
+Previous conversation summary:
 ${memory.summary.trim()}`;
     }
 
     if (historyText && historyText.trim().length > 0) {
       instruction += `
 
-Historial reciente de la conversación. Si es relevante, conéctalo con lo que aparece en la imagen:
+Recent conversation history. Connect it with what appears in the image when relevant:
 ${historyText.trim()}`;
     }
 
     if (hasText) {
       instruction += `
 
-Consulta actual del usuario:
+Current user question about the image:
 "${message}"
 `.trim();
     }
@@ -374,7 +561,7 @@ Consulta actual del usuario:
           buffer = await fs.promises.readFile(file.path);
         }
         if (!buffer) {
-          console.error("No se pudo obtener buffer de la imagen adjunta.");
+          console.error("Could not obtain buffer from image file.");
           continue;
         }
         const base64 = buffer.toString("base64");
@@ -386,7 +573,7 @@ Consulta actual del usuario:
           }
         });
       } catch (error) {
-        console.error("Error leyendo archivo de imagen:", error);
+        console.error("Error reading image file:", error);
       }
     }
 
@@ -411,8 +598,260 @@ Consulta actual del usuario:
       }
       return "La imagen se procesó correctamente, pero no recibí una descripción de salida.";
     } catch (error) {
-      console.error("Error en handleImageQuery:", error);
+      console.error("Error in handleImageQuery:", error);
       return "Lo siento, hubo un problema al analizar la imagen.";
+    }
+  }
+
+  async handleDocumentQuery(message, databaseId, documentFiles, options = {}, memory = { summary: "", messages: [] }) {
+    const hasText = typeof message === "string" && message.trim().length > 0;
+    const historyText = this.formatHistory(memory.messages);
+    let instruction;
+
+    if (hasText) {
+      instruction = `
+You are an expert assistant in Occupational Health and Safety (SSOMA) and in the analysis of business reports and documents.
+You will receive one or more attached documents.
+Use the actual content of the documents as the main source of truth to answer the user's question.
+If the question refers to calculations, payroll amounts, totals or indicators, explain step by step how those values are obtained from the information in the document.
+Answer in the same language as the user's message.
+Be tolerant of synonyms and minor spelling mistakes; only if the question is too ambiguous or unreadable should you ask the user to restate it, indicating the sheet, column or section they are referring to.
+`.trim();
+    } else {
+      instruction = `
+You are an expert assistant in Occupational Health and Safety (SSOMA) and in the analysis of business reports and documents.
+Analyze the attached document in detail and provide at least:
+1) A general summary of the content.
+2) The most important data, tables or metrics.
+3) Any inconsistencies or issues that deserve attention.
+4) If there are numerical calculations (for example payroll, indicators, costs), explain in simple terms how those results are obtained.
+When later text messages are provided about this document, answer in the same language as those messages.
+Be tolerant of synonyms and minor spelling mistakes in later questions about this document.
+`.trim();
+    }
+
+    if (memory.summary && memory.summary.trim().length > 0) {
+      instruction += `
+
+Previous conversation summary:
+${memory.summary.trim()}`;
+    }
+
+    if (historyText && historyText.trim().length > 0) {
+      instruction += `
+
+Recent conversation history. Connect it with what appears in the document when relevant:
+${historyText.trim()}`;
+    }
+
+    if (hasText) {
+      instruction += `
+
+Current user question related to the document:
+"${message}"
+`.trim();
+    }
+
+    const parts = [{ text: instruction }];
+    const newDocs = [];
+
+    for (const file of documentFiles) {
+      try {
+        let buffer = null;
+        if (file.buffer && Buffer.isBuffer(file.buffer)) {
+          buffer = file.buffer;
+        } else if (file.path) {
+          buffer = await fs.promises.readFile(file.path);
+        }
+        if (!buffer) {
+          console.error("Could not obtain buffer from document file.");
+          continue;
+        }
+
+        const name = (file.originalname || file.filename || file.name || "").toLowerCase();
+        const mimeTypeRaw = (file.mimetype || file.type || "").toLowerCase();
+        const isExcel =
+          name.endsWith(".xlsx") ||
+          name.endsWith(".xls") ||
+          mimeTypeRaw === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
+          mimeTypeRaw === "application/vnd.ms-excel";
+
+        if (isExcel) {
+          try {
+            const xlsxModule = await import("xlsx");
+            const xlsxLib = xlsxModule.default || xlsxModule;
+            const workbook = xlsxLib.read(buffer, { type: "buffer" });
+            const sheetNames = workbook.SheetNames || [];
+            let combined = "";
+            const maxSheets = 3;
+            const maxRowsPerSheet = 200;
+
+            for (let i = 0; i < sheetNames.length && i < maxSheets; i++) {
+              const sheetName = sheetNames[i];
+              const sheet = workbook.Sheets[sheetName];
+              if (!sheet) {
+                continue;
+              }
+              const rows = xlsxLib.utils.sheet_to_json(sheet, { header: 1, raw: false });
+              combined += `Sheet "${sheetName}" (first rows):\n`;
+              let rowCount = 0;
+              for (const row of rows) {
+                const cells = Array.isArray(row) ? row : [];
+                const line = cells
+                  .map(v => (v === undefined || v === null ? "" : String(v)))
+                  .join(" | ");
+                if (line.trim().length === 0) {
+                  continue;
+                }
+                combined += line + "\n";
+                rowCount++;
+                if (rowCount >= maxRowsPerSheet) {
+                  break;
+                }
+              }
+              combined += "\n";
+            }
+
+            if (combined.trim().length > 0) {
+              parts.push({ text: combined });
+              newDocs.push({
+                id: this.createDocId(),
+                name: file.originalname || file.filename || file.name || "Excel document",
+                mimeType: mimeTypeRaw || "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                kind: "text",
+                text: combined,
+                createdAt: Date.now()
+              });
+            }
+            continue;
+          } catch (error) {
+            console.error("Error processing Excel file:", error);
+          }
+        }
+
+        const base64 = buffer.toString("base64");
+        const mimeType = file.mimetype || file.type || "application/pdf";
+        parts.push({
+          inlineData: {
+            data: base64,
+            mimeType
+          }
+        });
+        newDocs.push({
+          id: this.createDocId(),
+          name: file.originalname || file.filename || file.name || "Document",
+          mimeType,
+          kind: "inlineData",
+          data: base64,
+          createdAt: Date.now()
+        });
+      } catch (error) {
+        console.error("Error reading document file:", error);
+      }
+    }
+
+    if (parts.length === 1) {
+      return "No fue posible leer el documento adjunto. Intenta subirlo nuevamente o envíalo en formato PDF, TXT, CSV, JSON o Excel (XLSX/XLS).";
+    }
+
+    if (options.threadId && newDocs.length > 0) {
+      const existing = this.documentsByThread.get(options.threadId);
+      const base = Array.isArray(existing) ? existing : [];
+      const merged = base.concat(newDocs);
+      const maxDocsStored = 5;
+      const trimmed = merged.slice(Math.max(0, merged.length - maxDocsStored));
+      this.documentsByThread.set(options.threadId, trimmed);
+    }
+
+    try {
+      const result = await model.generateContent({
+        contents: [
+          {
+            role: "user",
+            parts
+          }
+        ]
+      });
+      const response = result.response;
+      const text = response.text();
+      console.log("[Chat][DocResultText]", text);
+      if (typeof text === "string" && text.trim().length > 0) {
+        return text;
+      }
+      return "El documento se procesó correctamente, pero no recibí una explicación de salida.";
+    } catch (error) {
+      console.error("Error in handleDocumentQuery:", error);
+      return "Lo siento, hubo un problema al analizar el documento adjunto.";
+    }
+  }
+
+  async handleDocFollowUpQuery(message, databaseId, docs, memory = { summary: "", messages: [] }) {
+    const historyText = this.formatHistory(memory.messages);
+    let instruction = `
+You are an expert assistant in Occupational Health and Safety (SSOMA) and in the analysis of business reports and documents.
+The user has already provided one or more documents earlier in this same conversation.
+Use the information from those documents as the main source of truth to answer this new question.
+If the question refers to calculations, payroll amounts, totals or indicators, explain step by step how those values are obtained from the data in the documents.
+If there is more than one document, pick the one that contains the most relevant information for the question. If the question is too ambiguous, ask the user to indicate the document name, sheet or column they mean.
+Answer in the same language as the user's message.
+Be tolerant of synonyms and minor spelling mistakes; only if the question is too ambiguous or unreadable should you explicitly ask the user to clarify or point to the specific part of the document they care about.
+`.trim();
+
+    const names = docs.map(d => d.name).filter(Boolean);
+    if (names.length > 0) {
+      instruction += `
+
+Documents available in this conversation:
+${names.map(n => `- ${n}`).join("\n")}`;
+    }
+
+    if (memory.summary && memory.summary.trim().length > 0) {
+      instruction += `
+
+Previous conversation summary:
+${memory.summary.trim()}`;
+    }
+
+    if (historyText && historyText.trim().length > 0) {
+      instruction += `
+
+Recent conversation history:
+${historyText.trim()}`;
+    }
+
+    instruction += `
+
+New user question about the documents:
+"${message}"
+`.trim();
+
+    const parts = [{ text: instruction }];
+    const docParts = this.buildDocPartsFromMemory(docs);
+    if (docParts.length === 0) {
+      return await this.handleGeneralQuery(message, memory);
+    }
+    for (const p of docParts) {
+      parts.push(p);
+    }
+
+    try {
+      const result = await model.generateContent({
+        contents: [
+          {
+            role: "user",
+            parts
+          }
+        ]
+      });
+      const text = result.response.text();
+      console.log("[Chat][DocFollowUpResultText]", text);
+      if (typeof text === "string" && text.trim().length > 0) {
+        return text;
+      }
+      return "No pude utilizar correctamente los documentos anteriores para responder a esta pregunta. Indica el nombre del documento o la hoja a la que te refieres.";
+    } catch (error) {
+      console.error("Error in handleDocFollowUpQuery:", error);
+      return "Lo siento, hubo un problema al usar los documentos anteriores para responder tu pregunta.";
     }
   }
 
@@ -474,14 +913,15 @@ Consulta actual del usuario:
       return { summary: "", messages: recent };
     }
     const summaryPrompt = `
-Eres un asistente especializado en resumir conversaciones entre un usuario y un asistente virtual de SSOMA.
-Genera un resumen breve en español que conserve:
-- El contexto general de lo que el usuario está intentando lograr.
-- Los módulos, tablas o áreas del sistema Kaizen que se han mencionado.
-- Las decisiones o respuestas importantes que se hayan dado.
-- El estilo de comunicación relevante del usuario si aporta contexto.
+You are an assistant that summarizes conversations between a user and a SSOMA virtual assistant.
+Create a short summary that keeps:
+- The overall goal of the user.
+- The modules, tables or areas of the Kaizen system that have been mentioned.
+- Important decisions or answers that were given.
+- Any relevant details about the user's way of asking that might matter later.
+You do not need to preserve the original language verbatim in the summary; just capture the intent.
 
-Historial de conversación a resumir:
+Conversation to summarize:
 ${olderText}
 `.trim();
     try {
@@ -489,7 +929,7 @@ ${olderText}
       const summaryText = (result.response.text() || "").trim();
       return { summary: summaryText, messages: recent };
     } catch (error) {
-      console.error("Error generando resumen de conversación:", error);
+      console.error("Error generating conversation summary:", error);
       return { summary: "", messages: trimmed.slice(trimmed.length - maxRecent) };
     }
   }
@@ -500,10 +940,12 @@ ${olderText}
     }
     const text = (message || "").toLowerCase();
     const safeDb = databaseId.replace(/[^a-zA-Z0-9_]/g, "");
-    const mentionsPeople = /(persona|personas|colaborador|colaboradores|empleado|empleados|trabajador|trabajadores)/.test(text);
-    const asksCount = /(cu[aá]ntas|cu[aá]ntos|n[uú]mero|cantidad)/.test(text);
-    const mentionsInactive = /desactivad/.test(text) || /inactiv/.test(text);
-    const mentionsActive = /activas?/.test(text) || /activos?/.test(text);
+    const mentionsPeople = /(persona|personas|colaborador|colaboradores|empleado|empleados|trabajador|trabajadores|people|employee|employees|worker|workers)/.test(
+      text
+    );
+    const asksCount = /(cu[aá]ntas|cu[aá]ntos|n[uú]mero|cantidad|how many|how much|number of)/.test(text);
+    const mentionsInactive = /desactivad|inactiv|inactive|disabled/.test(text);
+    const mentionsActive = /activas?|activos?|active/.test(text);
 
     if (mentionsPeople && mentionsInactive) {
       if (asksCount) {
