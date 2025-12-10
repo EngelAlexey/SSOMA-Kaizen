@@ -16,7 +16,7 @@ router.post('/login', async (req, res) => {
         const [users] = await pool.query(
             `SELECT UserID, usName, usLicence, usStatus, usValidity, usCompanies, DatabaseID 
              FROM akUsers 
-             WHERE usLicence = ? AND usStatus = 1 
+             WHERE usLicence = ? 
              LIMIT 1`,
             [license]
         );
@@ -26,10 +26,23 @@ router.post('/login', async (req, res) => {
         }
 
         const user = users[0];
+        
+        let isActive = false;
+        if (user.usStatus && typeof user.usStatus === 'object' && Buffer.isBuffer(user.usStatus)) {
+            isActive = user.usStatus[0] === 1;
+        } else {
+            isActive = String(user.usStatus) === '1' || user.usStatus === 1 || user.usStatus === true;
+        }
+
+        if (!isActive) {
+            return res.status(401).json({ success: false, error: 'Licencia inactiva.' });
+        }
 
         if (user.usValidity) {
             const expiry = new Date(user.usValidity);
-            if (expiry < new Date()) {
+            const now = new Date();
+            
+            if (expiry < now) {
                 return res.status(403).json({ success: false, error: 'Su licencia ha caducado.' });
             }
         }
@@ -48,7 +61,7 @@ router.post('/login', async (req, res) => {
                 organizationName = user.usCompanies;
             }
         } catch (err) {
-            console.error('Error obteniendo organización:', err);
+            console.error(err);
         }
 
         const token = jwt.sign(
@@ -73,7 +86,7 @@ router.post('/login', async (req, res) => {
             }
         });
     } catch (error) {
-        console.error('Error de autenticación:', error);
+        console.error(error);
         res.status(500).json({ success: false, error: 'Error interno del servidor' });
     }
 });
