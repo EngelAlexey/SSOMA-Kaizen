@@ -155,7 +155,7 @@ function checkSession() {
     const tokenValid = !isJwtExpired(token);
 
     if (!currentUser || !licenseOk || !tokenValid) {
-        showLogin();
+        window.location.replace('login.html');
         return;
     }
 
