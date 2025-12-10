@@ -1,4 +1,5 @@
-const API_BASE = process.env.API_URL || 'http://127.0.0.1:3000';
+const DEFAULT_API_BASE = 'https://ssoma-kaizen-api.onrender.com';
+const API_BASE = localStorage.getItem('kaizen_api_base') || DEFAULT_API_BASE;
 const API_URL = `${API_BASE}/chat/query`;
 const LOGIN_URL = `${API_BASE}/auth/login`;
 
@@ -101,7 +102,6 @@ const modalBtnConfirm = document.getElementById('modalBtnConfirm');
 const modalBtnClose = document.getElementById('modalBtnClose');
 
 window.addEventListener('DOMContentLoaded', () => {
-    ensureActiveSession();
     checkSession();
     initProfileLogic();
 });
@@ -110,15 +110,56 @@ function isUserComplete(u) {
     return !!(u && u.prefix && u.usLicense && u.organization);
 }
 
+function hasValidLicense(user) {
+    if (!user) return false;
+
+    const rawLic = user.usLicense || user.license;
+    if (!rawLic) return false;
+
+    const lic = String(rawLic).trim();
+    if (!lic) return false;
+
+    const upper = lic.toUpperCase();
+
+    if (upper.startsWith('GUEST-')) {
+        localStorage.setItem('kaizen_mode', 'guest');
+        return true;
+    }
+
+    localStorage.setItem('kaizen_mode', 'corporate');
+    return true;
+}
+
+
+function isJwtExpired(token) {
+    if (!token) return true;
+    try {
+        const parts = token.split('.');
+        if (parts.length !== 3) return true;
+        const payloadJson = atob(parts[1].replace(/-/g, '+').replace(/_/g, '/'));
+        const payload = JSON.parse(payloadJson);
+        if (!payload.exp) return false;
+        const nowSec = Math.floor(Date.now() / 1000);
+        return payload.exp <= nowSec;
+    } catch (e) {
+        return true;
+    }
+}
+
 function checkSession() {
     currentUser = loadStoredUser();
     currentPrefix = loadStoredPrefix();
-    ensureActiveSession();
-    if (isUserComplete(currentUser)) {
-        showApp();
-    } else {
+    const token = localStorage.getItem('kaizen_token');
+
+    const licenseOk = hasValidLicense(currentUser);
+    const tokenValid = !isJwtExpired(token);
+
+    if (!currentUser || !licenseOk || !tokenValid) {
         showLogin();
+        return;
     }
+
+    showApp();
 }
 
 function showApp() {
@@ -704,21 +745,30 @@ function getStatusBadge(status) {
 function updateSidebarProfile() {
     const sbName = document.getElementById('sidebarUserName');
     const sbLic = document.getElementById('sidebarUserLic');
+
+    if (!sbName || !sbLic) return;
+
+    const user = loadStoredUser() || currentUser || null;
     const mode = localStorage.getItem('kaizen_mode');
-    if (!currentUser) return;
-    if (sbName) sbName.textContent = currentUser.usName || currentUser.name || 'Usuario';
-    if (sbLic) {
-        if (mode === 'guest') {
-            sbLic.textContent = 'Modo Invitado';
-            sbLic.style.color = '#fbbf24';
-        } else {
-            const org = currentUser.organization || currentUser.prefix || '---';
-            const prefix = currentPrefix || currentUser.prefix || 'UNK';
-            sbLic.textContent = `${org} · ${prefix}`;
-            sbLic.style.color = '#6b7280';
-        }
+
+    if (!user) {
+        sbName.textContent = 'Usuario';
+        sbLic.textContent = 'Sin sesión';
+        sbLic.style.color = '#6b7280';
+        return;
+    }
+
+    sbName.textContent = user.usName || user.name || 'Usuario';
+
+    if (mode === 'guest') {
+        sbLic.textContent = user.organization || 'DEMO';
+        sbLic.style.color = '#fbbf24';
+    } else {
+        sbLic.textContent = user.organization || user.prefix || 'Licencia activa';
+        sbLic.style.color = '#6b7280';
     }
 }
+
 
 function initProfileLogic() {
     const userProfileBtn = document.getElementById('userProfileBtn');
