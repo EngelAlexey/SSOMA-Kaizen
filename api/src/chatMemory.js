@@ -1,9 +1,5 @@
 import { query } from "./db.js";
 
-/**
- * Asegura que exista un registro de hilo en daChatThread
- * y lo asocia a un prefijo (cliente) y a una "licencia" (ID string de usuario/licencia).
- */
 export async function ensureChatThread(
   databaseId,
   threadId,
@@ -12,7 +8,6 @@ export async function ensureChatThread(
 ) {
   if (!databaseId || !threadId) return;
 
-  // Aquí licenseId es STRING (UUID, código, etc.). Ya no lo convertimos a número.
   const sql = `
     INSERT INTO daChatThread (ctClientPrefix, ctLicenseID, ctThreadID, ctAssistantID)
     VALUES (?, ?, ?, ?)
@@ -30,10 +25,6 @@ export async function ensureChatThread(
   }
 }
 
-/**
- * Guarda un mensaje (user/model) en daChatMessages.
- * Antes de insertar, se asegura que el hilo exista.
- */
 export async function saveChatMessage(
   threadId,
   databaseId,
@@ -67,10 +58,6 @@ export async function saveChatMessage(
   }
 }
 
-/**
- * Devuelve el historial de un hilo como lo espera ChatFlow:
- * [{ role: 'user'|'model', parts: [{ text: '...' }] }, ...]
- */
 export async function getChatHistory(threadId, databaseId, limit = 40) {
   if (!threadId || !databaseId) return [];
 
@@ -107,10 +94,6 @@ export async function getChatHistory(threadId, databaseId, limit = 40) {
   }
 }
 
-/**
- * Devuelve el dueño de un hilo (licenseId + prefijo).
- * Útil para validar acceso a un threadId.
- */
 export async function getThreadOwner(threadId) {
   if (!threadId) return null;
 
@@ -131,10 +114,6 @@ export async function getThreadOwner(threadId) {
   }
 }
 
-/**
- * (Para futuro multi-dispositivo) Listar hilos del usuario/licencia.
- * licenseId es STRING (mismo formato que guardas en ctLicenseID).
- */
 export async function getUserThreads(licenseId, clientPrefix, limit = 50) {
   if (!licenseId || !clientPrefix) return [];
 
@@ -176,10 +155,6 @@ export async function getUserThreads(licenseId, clientPrefix, limit = 50) {
   }
 }
 
-/**
- * (Para futuro multi-dispositivo) Mensajes de un hilo validando dueño.
- * licenseId es STRING igual que ctLicenseID.
- */
 export async function getThreadMessages(
   threadId,
   licenseId,

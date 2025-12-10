@@ -5,28 +5,26 @@ import cors from 'cors';
 import path from 'path';
 import fs from 'fs';
 
-// Importaciones locales
 import authRoutes from './src/routes/auth.js';
 import { handleChatQuery } from './src/routes/chatQuery.js';
 import { checkConnection } from './src/db.js'; 
 import { authMiddleware } from './src/middleware/authMiddleware.js';
 
 console.clear();
-console.log('🚀 INICIANDO SERVIDOR SSOMA-KAIZEN...');
+console.log('Iniciando KaizenGPT');
 
-// Validaciones de credenciales
 const keyPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
 if (!keyPath) {
-  console.error('❌ ERROR FATAL: Falta GOOGLE_APPLICATION_CREDENTIALS en .env');
+  console.error('ERROR FATAL: Falta GOOGLE_APPLICATION_CREDENTIALS en .env');
   process.exit(1);
 }
 
 const absoluteKeyPath = path.resolve(keyPath);
 if (!fs.existsSync(absoluteKeyPath)) {
-  console.error(`❌ ERROR FATAL: Credenciales no encontradas en: ${absoluteKeyPath}`);
+  console.error(`ERROR FATAL: Credenciales no encontradas en: ${absoluteKeyPath}`);
   process.exit(1);
 } else {
-  console.log(`✅ Credenciales Google: OK`);
+  console.log(`Credenciales Google: OK`);
 }
 
 const app = express();
@@ -39,7 +37,6 @@ app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
-// --- RUTAS ---
 app.use('/auth', authRoutes);
 
 const storage = multer.diskStorage({
@@ -78,12 +75,10 @@ app.get('/', (req, res) => {
   });
 });
 
-// Endpoint de Chat
 app.post('/chat/query', authMiddleware, upload.array('files'), handleChatQuery);
 
-// Manejo de errores
 app.use((err, req, res, next) => {
-  console.error('🔥 Error:', err.message);
+  console.error('Error:', err.message);
   if (err.message === 'INVALID_FILE_TYPE') {
     return res.status(400).json({ error: 'Formato de archivo no soportado.' });
   }
@@ -91,6 +86,6 @@ app.use((err, req, res, next) => {
 });
 
 app.listen(PORT, async () => {
-  console.log(`\n✅ SERVIDOR LISTO EN: http://localhost:${PORT}`);
+  console.log(`\nSERVIDOR LISTO EN: http://localhost:${PORT}`);
   await checkConnection();
 });

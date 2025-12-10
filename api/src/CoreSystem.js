@@ -1,9 +1,5 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
-// ==========================================
-// BASE DE CONOCIMIENTO DEL SISTEMA (SCHEMA)
-// ==========================================
-
 export class SystemKnowledgeBase {
     constructor() {
         this.internalTables = new Set([
@@ -180,12 +176,12 @@ if (apiKey) {
             model: "gemini-2.0-flash-001" 
         });
     } catch (e) {
-        console.error("⚠️ Error inicializando Gemini:", e);
+        console.error("Error inicializando API:", e);
     }
 }
 
 export async function callAI(userQuery, context) {
-    if (!model) return "Error: No se ha configurado la API Key de Gemini.";
+    if (!model) return "Error: No se ha configurado la API Key";
 
     try {
 
@@ -198,7 +194,7 @@ export async function callAI(userQuery, context) {
         const response = await result.response;
         return response.text();
     } catch (error) {
-        console.error("❌ Error Gemini:", error);
+        console.error("Error API:", error);
         return "Error de conexión con IA.";
     }
 }

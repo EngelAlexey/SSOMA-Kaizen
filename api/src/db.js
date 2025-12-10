@@ -20,7 +20,7 @@ const localCertPath = path.resolve(process.cwd(), './certs/server-ca.pem');
 const finalCertPath = fs.existsSync(certPath) ? certPath : localCertPath;
 
 if (fs.existsSync(finalCertPath)) {
-  console.log(`🔒 SSL Configurado: ${finalCertPath}`);
+  console.log(`SSL Configurado: ${finalCertPath}`);
   dbConfig.ssl = {
     ca: fs.readFileSync(finalCertPath),
     rejectUnauthorized: process.env.MYSQL_SSL_REJECT_UNAUTHORIZED === 'true'
@@ -39,20 +39,10 @@ function generarHashLicencia(licencia) {
 export async function checkConnection() {
   try {
     const connection = await pool.getConnection();
-    console.log(`✅ Conexión a DB establecida.`);
+    console.log(`Conexión a DB establecida.`);
     connection.release();
   } catch (error) {
-    console.error('❌ Error conexión DB:', error.message);
-  }
-}
-
-export async function query(sql, params) {
-  try {
-    const [results] = await pool.execute(sql, params);
-    return results;
-  } catch (error) {
-    console.error('Database query error:', error);
-    throw error;
+    console.error('Error conexión DB:', error.message);
   }
 }
 

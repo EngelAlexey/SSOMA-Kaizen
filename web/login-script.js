@@ -1,15 +1,12 @@
-const API_URL = 'http://localhost:3000'; 
+const API_URL = 'http://localhost:3000';
 
 function showToast(title, message, type = 'info') {
     const container = document.getElementById('toast-container');
-    
     const toast = document.createElement('div');
     toast.className = `toast ${type}`;
-    
     let iconClass = 'fa-info-circle';
     if (type === 'success') iconClass = 'fa-check-circle';
     if (type === 'error') iconClass = 'fa-exclamation-triangle';
-
     toast.innerHTML = `
         <i class="fas ${iconClass}"></i>
         <div class="toast-content">
@@ -17,13 +14,10 @@ function showToast(title, message, type = 'info') {
             <span class="toast-msg">${message}</span>
         </div>
     `;
-
     container.appendChild(toast);
-
     requestAnimationFrame(() => {
         toast.classList.add('visible');
     });
-
     setTimeout(() => {
         toast.classList.remove('visible');
         setTimeout(() => toast.remove(), 400);
@@ -34,15 +28,45 @@ function smoothRedirect(url) {
     document.body.classList.add('page-exit');
     setTimeout(() => {
         window.location.href = url;
-    }, 800); 
+    }, 800);
 }
 
 const signUpButton = document.getElementById('signUp');
 const signInButton = document.getElementById('signIn');
 const container = document.getElementById('container');
 
-signUpButton.addEventListener('click', () => container.classList.add("right-panel-active"));
-signInButton.addEventListener('click', () => container.classList.remove("right-panel-active"));
+signUpButton.addEventListener('click', () => container.classList.add('right-panel-active'));
+signInButton.addEventListener('click', () => container.classList.remove('right-panel-active'));
+
+function saveCorporateUser(user, token) {
+    const normalizedUser = {
+        usName: user.name || '',
+        prefix: user.prefix || '',
+        usLicense: user.license || '',
+        organization: user.organization || ''
+    };
+    localStorage.setItem('kaizen_user', JSON.stringify(normalizedUser));
+    localStorage.setItem('kaizen_mode', 'corporate');
+    if (normalizedUser.prefix) {
+        localStorage.setItem('kaizen_prefix', normalizedUser.prefix);
+    }
+    if (token) {
+        localStorage.setItem('kaizen_token', token);
+    }
+}
+
+function saveGuestUser() {
+    const guestUser = {
+        usName: 'Invitado',
+        prefix: 'DEM',
+        usLicense: 'GUEST-ACCESS-DEMO',
+        organization: 'DEMO'
+    };
+    localStorage.setItem('kaizen_user', JSON.stringify(guestUser));
+    localStorage.setItem('kaizen_mode', 'guest');
+    localStorage.removeItem('kaizen_token');
+    localStorage.setItem('kaizen_prefix', guestUser.prefix);
+}
 
 document.getElementById('license-form').addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -58,8 +82,8 @@ document.getElementById('license-form').addEventListener('submit', async (e) => 
         return;
     }
 
-    btn.innerText = "Verificando...";
-    btn.style.opacity = "0.7";
+    btn.innerText = 'Verificando...';
+    btn.style.opacity = '0.7';
     btn.disabled = true;
 
     try {
@@ -71,45 +95,30 @@ document.getElementById('license-form').addEventListener('submit', async (e) => 
 
         const data = await response.json();
 
-        if (data.success) {
+        if (response.ok && data.success && data.user) {
             showToast('Acceso Autorizado', `Bienvenido, ${data.user.name}`, 'success');
-            
-            localStorage.setItem('kaizen_token', data.token);
-            localStorage.setItem('kaizen_user', data.user.name);
-            localStorage.setItem('kaizen_prefix', data.user.prefix);
-            localStorage.setItem('kaizen_mode', 'corporate');
-
+            saveCorporateUser(data.user, data.token);
             setTimeout(() => {
                 smoothRedirect('index.html');
             }, 1000);
-
         } else {
-            throw new Error(data.error || "Licencia no válida.");
+            throw new Error(data.error || data.message || 'Licencia no válida.');
         }
-
     } catch (error) {
-        console.error(error);
         const msg = error.message === 'Failed to fetch' ? 'No se pudo conectar al servidor.' : error.message;
-        
         showToast('Acceso Denegado', msg, 'error');
-        
         licenseInput.classList.add('input-error');
         setTimeout(() => licenseInput.classList.remove('input-error'), 500);
-        
         btn.innerText = originalBtnText;
-        btn.style.opacity = "1";
+        btn.style.opacity = '1';
         btn.disabled = false;
     }
 });
 
 document.getElementById('btn-guest-access').addEventListener('click', (e) => {
     e.preventDefault();
-    
     showToast('Modo Invitado', 'Iniciando entorno limitado...', 'info');
-    
-    localStorage.removeItem('kaizen_token');
-    localStorage.setItem('kaizen_mode', 'guest');
-
+    saveGuestUser();
     setTimeout(() => {
         smoothRedirect('index.html');
     }, 1200);

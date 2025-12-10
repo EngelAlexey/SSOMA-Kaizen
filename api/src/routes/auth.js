@@ -62,8 +62,6 @@ router.post('/login', async (req, res) => {
             { expiresIn: '12h' }
         );
 
-        console.log(`✅ [Auth] Usuario: ${user.usName} | Org: ${organizationName} | Licencia: ${user.usLicence}`);
-
         res.json({
             success: true,
             token,
@@ -75,7 +73,7 @@ router.post('/login', async (req, res) => {
             }
         });
     } catch (error) {
-        console.error('🔥 Error en /auth/login:', error);
+        console.error('Error de autenticación:', error);
         res.status(500).json({ success: false, error: 'Error interno del servidor' });
     }
 });

@@ -35,16 +35,13 @@ function collectFilesFromRequest(req) {
 
 export async function handleChatQuery(req, res) {
   try {
-    // Texto del mensaje
     const rawMessage =
       typeof req.body.query === "string" ? req.body.query : req.body.message;
     const message = typeof rawMessage === "string" ? rawMessage.trim() : "";
 
-    // Archivos adjuntos
     const files = collectFilesFromRequest(req);
     const hasFiles = files.length > 0;
 
-    // Identidad real del usuario (desde el token)
     const userContext = req.userContext || {};
 
     const licenseId =
@@ -95,17 +92,6 @@ export async function handleChatQuery(req, res) {
         }
       }
     }
-
-    const logMessage =
-      message && message.length > 0 ? message : "[solo archivo]";
-    console.log(
-      `[Chat] User: ${userForLog} | LicenseID: ${
-        licenseId || "N/A"
-      } | DB: ${databaseId || "None"} | Thread: ${
-        threadId || "None"
-      } | Msg: ${logMessage}`
-    );
-    console.log(`[Chat][Files] Adjuntos recibidos: ${files.length}`);
 
     const reply = await chatOrchestrator.handleUserMessage(message, databaseId, {
       files,
