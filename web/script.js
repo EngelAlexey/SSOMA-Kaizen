@@ -1,5 +1,4 @@
-const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-const API_BASE = isLocal ? 'http://127.0.0.1:3000' : 'https://ssoma-kaizen-api.onrender.com';
+const API_BASE = process.env.API_URL || 'http://127.0.0.1:3000';
 const API_URL = `${API_BASE}/chat/query`;
 const LOGIN_URL = `${API_BASE}/auth/login`;
 
