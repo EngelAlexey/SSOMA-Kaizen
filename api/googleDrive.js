@@ -20,7 +20,7 @@ export async function downloadFileFromDrive(fileId) {
 
     const url = `https://drive.google.com/uc?id=${encodeURIComponent(fileId)}`;
 
-    const resp = await fetch(url); // Node 22 ya trae fetch global
+    const resp = await fetch(url); 
     if (!resp.ok) {
       const body = await resp.text().catch(() => "");
       console.error("Error descargando desde Drive:", resp.status, body);

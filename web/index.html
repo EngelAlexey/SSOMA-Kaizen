@@ -14,7 +14,8 @@
 <body>
   <div class="background-layer"></div>
   <div class="veil"></div>
-
+  <div id="toast-container"></div>
+  
   <div class="layout">
     <aside class="sidebar" id="sidebar">
       <div class="sb-head">
@@ -25,11 +26,37 @@
         </div>
       </div>
       
-      <div id="convList" class="conv-list"></div>
-      
-      <button class="sb-btn-new" id="btnNewChat">
+      <button class="sb-btn-new full-width" id="btnNewChat">
         <i class="fa-solid fa-plus"></i> Nuevo Chat
       </button>
+
+      <div id="convList" class="conv-list"></div>
+      
+      <div class="user-profile-container" id="userProfileBtn">
+        <div class="user-profile-row">
+          <div class="avatar small">
+            <img src="./assets/Icon App.png" alt="User">
+          </div>
+          <div class="user-info-text">
+            <div class="u-name" id="sidebarUserName">Usuario</div>
+            <div class="u-lic" id="sidebarUserLic">Licencia activa</div>
+          </div>
+          <i class="fa-solid fa-ellipsis-vertical menu-dots"></i>
+        </div>
+
+        <div class="user-menu-popover" id="userMenuPopover">
+          <div class="popover-item" id="menuBtnProfile">
+            <i class="fa-regular fa-id-card"></i> Mi perfil
+          </div>
+          <div class="popover-item" id="menuBtnSettings">
+            <i class="fa-solid fa-gear"></i> Configuraciones
+          </div>
+          <div class="popover-divider"></div>
+          <div class="popover-item danger" id="menuBtnLogout">
+            <i class="fa-solid fa-arrow-right-from-bracket"></i> Cerrar sesión
+          </div>
+        </div>
+      </div>
     </aside>
 
     <main>
@@ -66,6 +93,7 @@
 
         <div class="composer">
           <div class="bar-container">
+            <div id="file-preview-area"></div>
             <div class="bar">
               <label class="btn-attach" title="Adjuntar archivo">
                 <input id="fileInput" type="file" multiple />
@@ -96,7 +124,7 @@
         <button class="btn-close-modal" id="modalBtnClose"><i class="fa-solid fa-xmark"></i></button>
       </div>
       
-      <p id="modalMessage">Mensaje de confirmación</p>
+      <div id="modalMessage">Mensaje de confirmación</div>
       
       <div id="modalInputContainer" style="display: none;">
         <input type="text" id="modalInput" class="modal-input" autocomplete="off" spellcheck="false">
