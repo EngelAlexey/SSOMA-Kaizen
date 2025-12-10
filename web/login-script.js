@@ -1,4 +1,6 @@
-const API_URL = 'http://localhost:3000';
+const DEFAULT_API_BASE = 'https://ssoma-kaizen-api.onrender.com';
+const API_BASE = localStorage.getItem('kaizen_api_base') || DEFAULT_API_BASE;
+const API_URL = API_BASE;
 
 function showToast(title, message, type = 'info') {
     const container = document.getElementById('toast-container');
