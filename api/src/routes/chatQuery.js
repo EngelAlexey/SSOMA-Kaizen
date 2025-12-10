@@ -52,14 +52,10 @@ export async function handleChatQuery(req, res) {
     const prefixFromToken = userContext.prefix || null;
     let databaseId = prefixFromToken || req.body.databaseId || null;
 
-    // =====================================================================
-    // 🔒 CORRECCIÓN DE SEGURIDAD: MODO DEMO
-    // =====================================================================
     if (databaseId === 'DEM' || databaseId === 'DEMO') {
         const forbiddenKeywords = ['select', 'insert', 'update', 'delete', 'create', 'drop', 'alter', 'tabla', 'base de datos', 'usuarios', 'registros', 'sql', 'query', 'count', 'from'];
         const lowerMsg = message.toLowerCase();
         
-        // 1. Bloquear intentos explícitos de manipular o consultar BD
         if (forbiddenKeywords.some(w => lowerMsg.includes(w))) {
             const denialMsg = "🔒 Modo Demo: No tienes permisos para consultar la base de datos o ver registros de usuarios. Solo puedo responder preguntas generales.";
             console.log("[Chat][DEMO_BLOCK] Intento de SQL bloqueado:", message);
@@ -70,11 +66,8 @@ export async function handleChatQuery(req, res) {
             });
         }
         
-        // 2. Forzar entorno común para evitar uso de herramientas SQL en ChatOrchestrator
-        // Esto asegura que aunque el prompt pase el filtro, el sistema no tenga credenciales reales
         databaseId = 'COMMON';
     }
-    // =====================================================================
 
     const threadId = req.body.threadId || null;
 
